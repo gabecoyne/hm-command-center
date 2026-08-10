@@ -110,6 +110,7 @@ function LogRow({ it, onOpen }) {
 /* Decision controls — declarative replacement for controlsHTML/wireControls. */
 function Controls({ it, onAck, onSave }) {
   const [note, setNote] = useState('');
+  const [noteErr, setNoteErr] = useState(false);
   const [anote, setANote] = useState('');
   const [choice, setChoice] = useState('');
   const rn = `mc-${it.item_id}-d`;
@@ -120,6 +121,15 @@ function Controls({ it, onAck, onSave }) {
     return html`<div class="flex flex-wrap gap-2 items-center"><button class=${pb} onClick=${() => onAck(it)}>Acknowledge</button><span class="text-[11px] text-slate-400 max-w-[380px]">Heads-up only — nothing to decide. If this needs action, the producing agent should have filed an approval.</span></div>`;
   }
   const ap = it.approval || {}; const opts = (ap.options || []);
+  /* The note is a pre-fill field and these buttons save immediately, so an empty-note click used to write
+     a decision with feedback:'' — a dead end for the producing agent's read-back (Attention_Item_Contract.md
+     §6: changes_requested means fold the feedback into a revised proposal, rejected means record the
+     learning). Reject and Request changes require the note; Approve does not. */
+  function decide(decision, msg) {
+    const n = note.trim();
+    if (!n) { setNoteErr(true); return banner('err', msg); }
+    onSave(it, { decision, feedback: n });
+  }
   function answer() {
     if (!choice) return banner('err', 'Pick an option.');
     const n = anote.trim();
@@ -132,10 +142,10 @@ function Controls({ it, onAck, onSave }) {
       </div>
       <div class="flex gap-2 mb-3"><input value=${anote} onInput=${e => setANote(e.target.value)} class=${inp} placeholder="Optional note…"/><button class=${pb} onClick=${answer}>Save answer</button></div>` : null}
     <div class="flex flex-wrap gap-2 items-center">
-      <button class=${pb} onClick=${() => onSave(it, { decision: 'approved', feedback: note })}>Approve</button>
-      <button class="px-3.5 py-2 rounded-lg border border-edge text-slate-300 text-sm hover:border-rose-500/60 hover:text-rose-300" onClick=${() => onSave(it, { decision: 'rejected', feedback: note })}>Reject</button>
-      <input value=${note} onInput=${e => setNote(e.target.value)} class=${inp} placeholder="Add a note…"/>
-      <button class="px-3.5 py-2 rounded-lg border border-edge text-slate-400 text-sm hover:text-white" onClick=${() => onSave(it, { decision: 'changes_requested', feedback: note })}>Request changes</button>
+      <button class=${pb} onClick=${() => onSave(it, { decision: 'approved', feedback: note.trim() })}>Approve</button>
+      <button class="px-3.5 py-2 rounded-lg border border-edge text-slate-300 text-sm hover:border-rose-500/60 hover:text-rose-300" onClick=${() => decide('rejected', "Add a note first — say why you're rejecting. The agent reads it back and won't re-propose.")}>Reject</button>
+      <input value=${note} onInput=${e => { setNote(e.target.value); if (noteErr) setNoteErr(false); }} class=${inp} style=${noteErr ? 'border-color:#f43f5e' : ''} placeholder="Note — required to reject or request changes…"/>
+      <button class="px-3.5 py-2 rounded-lg border border-edge text-slate-400 text-sm hover:text-white" onClick=${() => decide('changes_requested', "Add a note first — say what's wrong or what to change. The agent re-files from that note.")}>Request changes</button>
     </div>`;
 }
 
