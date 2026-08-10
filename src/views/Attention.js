@@ -3,7 +3,7 @@
 import { html } from '../html.js';
 import { useState } from 'preact/hooks';
 import { useStore, getState, currentUser } from '../state.js';
-import { putQueue } from '../data.js';
+import { postDecision } from '../data.js';
 import { esc, mdToHtml, nowCT, schWhen } from '../lib/format.js';
 import { userAv, EMB, TONE } from '../lib/avatars.js';
 import { isLive, isAlert } from '../lib/attention.js';
@@ -193,26 +193,24 @@ export function Attention(props) {
   /* Approvals: the human writes the DECISION into approval.*; top-level status stays "open" until the
      producing agent reads it back (Attention_Item_Contract.md §6) and sets approval.ack_at. */
   async function save(it, patch) {
-    const list = getState().attn.items || [];
-    const idx = list.findIndex(i => i.item_id === it.item_id); if (idx < 0) return;
-    const before = list[idx];
+    const before = (getState().attn.items || []).find(i => i.item_id === it.item_id) || it;
     if (isAlert(before)) return banner('err', "That's an alert — alerts are acknowledged, not decided.");
-    const now = nowCT(), by = currentUser();
-    const ap = { ...(before.approval || {}), decision: patch.decision, feedback: patch.feedback || '', decided_by: by, decided_at: now };
-    const upd = { ...before, approval: ap, status: before.status || 'open', history: [...(before.history || []), { ts: now, by, action: patch.decision, note: patch.feedback || '' }] };
-    try { await putQueue(list.map((i, k) => k === idx ? upd : i), now); setOpen(null); banner('ok', `Saved — <b>${esc(before.title || it.item_id)}</b>. ${esc(before.source || 'The agent')} picks it up next run.`); }
-    catch (e) { banner('err', 'Write failed (server running?). ' + esc(e.message)); }
+    try {
+      await postDecision({ item_id: before.item_id, kind: 'decision', by: currentUser(),
+                           decision: patch.decision, feedback: patch.feedback || '' });
+      setOpen(null);
+      banner('ok', `Saved — <b>${esc(before.title || it.item_id)}</b>. ${esc(before.source || 'The agent')} picks it up next run.`);
+    } catch (e) { banner('err', 'Write failed (server running?). ' + esc(e.message)); }
   }
   /* Alerts: one Acknowledge is the entire lifecycle — ack_at/ack_by at the top level, status -> resolved. */
   async function ack(it) {
-    const list = getState().attn.items || [];
-    const idx = list.findIndex(i => i.item_id === it.item_id); if (idx < 0) return;
-    const before = list[idx];
+    const before = (getState().attn.items || []).find(i => i.item_id === it.item_id) || it;
     if (!isAlert(before)) return banner('err', "That's an approval — it needs a decision, not an acknowledgement.");
-    const now = nowCT(), by = currentUser();
-    const upd = { ...before, ack_at: now, ack_by: by, status: 'resolved', resolved_at: now, history: [...(before.history || []), { ts: now, by, action: 'acknowledged', note: '' }] };
-    try { await putQueue(list.map((i, k) => k === idx ? upd : i), now); setOpen(null); banner('ok', `Acknowledged — <b>${esc(before.title || it.item_id)}</b>.`); }
-    catch (e) { banner('err', 'Write failed (server running?). ' + esc(e.message)); }
+    try {
+      await postDecision({ item_id: before.item_id, kind: 'ack', by: currentUser() });
+      setOpen(null);
+      banner('ok', `Acknowledged — <b>${esc(before.title || it.item_id)}</b>.`);
+    } catch (e) { banner('err', 'Write failed (server running?). ' + esc(e.message)); }
   }
 
   const items = (s.attn.items || []).filter(isLive).filter(i => who === 'all' ? true : String(i.owner || '').toLowerCase() === who).sort(qSort);

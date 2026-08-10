@@ -3,7 +3,7 @@
 import { html } from '../html.js';
 import { useState } from 'preact/hooks';
 import { useStore, getState, currentUser } from '../state.js';
-import { aPut, putQueue } from '../data.js';
+import { aPut, postItem, postDecision } from '../data.js';
 import { esc, cap, mdToHtml, nowCT } from '../lib/format.js';
 import { avatarSigil, forAvatars } from '../lib/avatars.js';
 import { banner, copyPrompt } from '../components/Toasts.js';
@@ -70,9 +70,13 @@ function Drawer({ r, onClose, onRead }) {
       source: r.source || 'human', generated_at: now, resolves_by: null, status: 'open', resolved_at: null, dedup_key: null, ack_at: null, ack_by: null,
       approval: { question: v, options: [], what_i_found: null, proposal: null, expected_outcome: null, detail: null, decision: 'answered', feedback: v, decided_by: by, decided_at: now, ack_at: null, ack_by: null },
     };
-    const items = [...((getState().attn.items) || []).filter(x => x.item_id !== iid), item];
-    try { await putQueue(items, now); setNote(''); banner('ok', 'Note filed to the attention queue — the agent picks it up next run.'); }
-    catch (e) { banner('err', 'Note save failed. ' + esc(e.message)); }
+    /* Two creates, never a whole-queue write: the item file, then the answer as its own record. */
+    const { decision, feedback, decided_by, decided_at, ...ap } = item.approval;
+    try {
+      await postItem({ ...item, approval: ap });
+      await postDecision({ item_id: iid, kind: 'decision', by, decision: 'answered', feedback: v });
+      setNote(''); banner('ok', 'Note filed to the attention queue — the agent picks it up next run.');
+    } catch (e) { banner('err', 'Note save failed. ' + esc(e.message)); }
   }
 
   return html`

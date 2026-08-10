@@ -19,7 +19,8 @@ export const aHealth = async () => { try { return (await fetch((CONFIG.apiBase |
 
 export async function load() {
   const [attn, roster, elog, tasks, dash, inv, reports, analysis, life, sched, model, cash] = await Promise.all([
-    aGet('attention/queue.json').catch(() => ({ items: [] })),
+    fetch((CONFIG.apiBase || '') + '/api/attention/state').then(r => r.json())
+      .catch(() => aGet('attention/queue.json').catch(() => ({ items: [] }))),
     aGet('ecomm_state.json').catch(() => ({ agents: [], schedules: {} })),
     aGet('event_log.json').catch(() => ({ items: [] })),
     aGet('tasks.json').catch(() => ({ tasks: [], columns: ['backlog', 'scheduled', 'in_progress', 'done'] })),
@@ -37,12 +38,41 @@ export async function load() {
   setState({ attn, roster, elog, tasks, dash, inv, reports, analysis, life, sched, model, cash, roadmap, loading: false });
 }
 
-// Write helper for the attention queue (used by Reports note-filing, etc.).
-export async function putQueue(items, updated) {
-  const q = { ...(getState().attn || {}), items, updated: updated || new Date().toISOString() };
-  const res = await aPut('attention/queue.json', q);
-  setState({ attn: res });
-  return res;
+/* The attention queue is append-only: one file per item, one file per decision, and a generated
+   snapshot. The client never sends the whole queue, because a window holding an older snapshot
+   would revert every decision made since it loaded (2026-08-10). It POSTs ONE record and takes
+   the freshly folded state back. See Doc/Engineering/HM_Shared_State_Architecture.md. */
+const aPost = async (path, body) => {
+  const r = await fetch((CONFIG.apiBase || '') + path, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  let out = null; try { out = await r.json(); } catch {}
+  if (!r.ok) throw new Error((out && out.error) || 'HTTP ' + r.status);
+  return out;
+};
+
+// Record one decision / acknowledgement. Returns the folded queue, which includes anything the
+// other machine decided while this window was open.
+export async function postDecision(rec) {
+  const attn = await aPost('/api/attention/decision', rec);
+  setState({ attn });
+  return attn;
+}
+
+// File one new item (e.g. a note from the Reports drawer).
+export async function postItem(item) {
+  const attn = await aPost('/api/attention/item', item);
+  setState({ attn });
+  return attn;
+}
+
+// Refold from the server (used after a write conflict or on demand).
+export async function refreshAttention() {
+  const r = await fetch((CONFIG.apiBase || '') + '/api/attention/state');
+  if (!r.ok) return null;
+  const attn = await r.json();
+  setState({ attn });
+  return attn;
 }
 
 // Write helper for the task board.
