@@ -1,0 +1,17 @@
+# Command Center — code is tracked; runtime state is NOT.
+# Data lives on the shared Drive and is written by collectors/agents.
+# Git must never carry it, and deploys must never overwrite it.
+
+# Runtime state (all of it)
+data/
+
+# Hand-rolled backups — git history replaces these
+*.bak
+index.backup-*.html
+index.pre-*.html
+index.pre-*.bak
+
+# OS / Python cruft
+.DS_Store
+__pycache__/
+*.pyc
