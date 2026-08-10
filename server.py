@@ -27,14 +27,16 @@ from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
 # The Command Center OWNS its data (approvals, questions, tasks) — writes go here only.
-DATA_DIR = Path(os.environ.get("CC_DATA", BASE / "data")).resolve()
+DATA_DIR = Path(os.environ.get("CC_DATA", BASE.parent / "data")).resolve()
 # Read-only fallback for agent-org state the CC displays but doesn't own
 # (ecomm_state.json roster + event_log.json for "last active"). Never written.
-READ_FALLBACK = Path(os.environ.get("CC_READ_FALLBACK", BASE.parent / "Wiki" / "data")).resolve()
+READ_FALLBACK = Path(os.environ.get("CC_READ_FALLBACK", BASE.parent / "data")).resolve()
 PORT = int(os.environ.get("CC_PORT", "8787"))
 API = "/api/data/"
 CTYPES = {".html": "text/html; charset=utf-8", ".js": "application/javascript",
-          ".css": "text/css", ".json": "application/json", ".svg": "image/svg+xml"}
+          ".mjs": "application/javascript", ".css": "text/css", ".json": "application/json",
+          ".svg": "image/svg+xml", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+          ".png": "image/png", ".ico": "image/x-icon", ".woff2": "font/woff2"}
 
 
 def atomic_write(path: Path, data) -> None:
