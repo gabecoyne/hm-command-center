@@ -56,13 +56,13 @@
   <nav class="p-2 space-y-0.5 text-sm flex-1" id="nav">
     <button class="nav w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-white bg-panel2" data-nav="dashboard"><span>▚</span> Dashboard</button>
     <button class="nav w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-panel2" data-nav="tasks"><span>▦</span> Priorities</button>
+    <button class="nav w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-panel2" data-nav="roadmap"><span>▬</span> Product Roadmap</button>
     <div class="px-3 pt-4 pb-1 text-[10px] uppercase tracking-widest text-slate-500">Agentic Layer</div>
     <button class="nav w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-panel2" data-nav="attention"><span>◎</span> Attention <span class="ml-auto text-[11px] font-mono px-1.5 rounded bg-amber-400/15 text-amber-300" id="nav-q">0</span></button>
     <button class="nav w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-panel2" data-nav="reports"><span>▤</span> Reports <span class="ml-auto text-[11px] font-mono px-1.5 rounded bg-white/5 text-slate-400" id="nav-r">0</span></button>
     <button class="nav w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-panel2" data-nav="agents"><span>⬡</span> Agents <span class="ml-auto text-[11px] font-mono px-1.5 rounded bg-white/5 text-slate-400" id="nav-a">0</span></button>
     <button class="nav w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-panel2" data-nav="schedule"><span>◔</span> Schedule <span class="ml-auto text-[11px] font-mono px-1.5 rounded bg-white/5 text-slate-400" id="nav-s">0</span></button>
     <button class="nav w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-panel2" data-nav="activity"><span>≋</span> Activity</button>
-    <button class="nav w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-panel2" data-nav="roadmap"><span>▬</span> Roadmap</button>
   </nav>
   <div class="p-3 border-t border-edge">
     <div class="text-[10px] uppercase tracking-widest text-slate-400 mb-1.5">Reviewing as</div>
@@ -856,9 +856,9 @@ function reportFor(r){const a=(r.assignees||[]).map(x=>String(x).toLowerCase()).
   if(/fin|cash|\bcs\b|gorgias|invent|ship|duty|cbp|hestia|demeter|athena/.test(src))return ["collin"];return ["gabe"];}
 function forAvatars(list,px){if(!list||!list.length)return "";return '<span class="inline-flex -space-x-1.5" title="for '+esc(list.join(" & "))+'">'+list.map(u=>userAv(u,px||20)).join("")+"</span>";}
 /* ===== Product Roadmap (Gantt) ===== */
-const RM_STAGE_FB={concept:{label:"Concept",color:"#64748b"},design:{label:"Design",color:"#38bdf8"},production:{label:"Production",color:"#f59e0b"},shipping:{label:"Shipping",color:"#818cf8"}};
-const RM_MS_FB={land:{label:"Lands",color:"#e2e8f0",glyph:"diamond"},preorder:{label:"Pre-order opens",color:"#34d399",glyph:"diamond"},preorder_ship:{label:"Pre-orders ship",color:"#818cf8",glyph:"diamond"},launch:{label:"Launch",color:"#fbbf24",glyph:"star"}};
-const RM_STATUS={concept:["Concept","bg-slate-500/15 text-slate-300 border-slate-400/20"],design:["Design","bg-sky-500/15 text-sky-300 border-sky-400/20"],production:["Production","bg-amber-500/15 text-amber-300 border-amber-400/20"],shipping:["Shipping","bg-indigo-500/15 text-indigo-300 border-indigo-400/20"],transit:["In transit","bg-indigo-500/15 text-indigo-300 border-indigo-400/20"],live:["Live","bg-emerald-500/15 text-emerald-300 border-emerald-400/20"]};
+const RM_STAGE_FB={concept:{label:"Concept",color:"#64748b"},design:{label:"Design",color:"#38bdf8"},production:{label:"Production",color:"#f59e0b"},shipping:{label:"Freight",color:"#818cf8"}};
+const RM_MS_FB={land:{label:"Lands",color:"#e2e8f0",glyph:"diamond"},preorder:{label:"Pre-order opens",color:"#34d399",glyph:"diamond"},preorder_ship:{label:"Pre-orders ship",color:"#818cf8",glyph:"diamond"},launch:{label:"Ready to ship",color:"#fbbf24",glyph:"star"}};
+const RM_STATUS={concept:["Concept","bg-slate-500/15 text-slate-300 border-slate-400/20"],design:["Design","bg-sky-500/15 text-sky-300 border-sky-400/20"],production:["Production","bg-amber-500/15 text-amber-300 border-amber-400/20"],shipping:["Freight","bg-indigo-500/15 text-indigo-300 border-indigo-400/20"],transit:["In transit","bg-indigo-500/15 text-indigo-300 border-indigo-400/20"],live:["Live","bg-emerald-500/15 text-emerald-300 border-emerald-400/20"]};
 let rmFilter="all";
 const rmDay=s=>new Date(String(s).slice(0,10)+"T00:00:00");
 const rmFom=d=>new Date(d.getFullYear(),d.getMonth(),1);
