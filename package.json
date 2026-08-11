@@ -1,0 +1,16 @@
+{
+  "name": "hm-command-center",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler pages dev . --port 8788",
+    "db:schema:local": "wrangler d1 execute hm-command-center --local --file cloudflare/schema.sql",
+    "db:seed:local": "wrangler d1 execute hm-command-center --local --file cloudflare/seed_attention.sql",
+    "db:schema": "wrangler d1 execute hm-command-center --remote --file cloudflare/schema.sql",
+    "db:seed": "wrangler d1 execute hm-command-center --remote --file cloudflare/seed_attention.sql",
+    "seed:docs:local": "python3 scripts/seed_docs.py http://127.0.0.1:8788"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
