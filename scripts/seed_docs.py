@@ -20,7 +20,7 @@ def find_pool(argv):
 def main():
     if len(sys.argv) < 2: sys.exit("usage: seed_docs.py <base_url> [pool]")
     base = sys.argv[1].rstrip("/"); pool = find_pool(sys.argv)
-    hdr = {"Content-Type": "application/json"}
+    hdr = {"Content-Type": "application/json", "User-Agent": "hm-cc-seed/1.0 (+https://hostmodern.co)", "Accept": "application/json"}
     if os.environ.get("CF_ACCESS_CLIENT_ID"):
         hdr["CF-Access-Client-Id"] = os.environ["CF_ACCESS_CLIENT_ID"]
         hdr["CF-Access-Client-Secret"] = os.environ.get("CF_ACCESS_CLIENT_SECRET", "")

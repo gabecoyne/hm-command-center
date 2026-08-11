@@ -12,4 +12,4 @@ compatibility_date = "2024-11-06"
 [[d1_databases]]
 binding = "DB"
 database_name = "hm-command-center"
-database_id = "REPLACE_AFTER_d1_create"
+database_id = "5355e921-e3fc-4bd9-acea-3a5b343ca2c2"
