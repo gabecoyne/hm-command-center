@@ -33,9 +33,11 @@ function UserBtn({ id, label, user, setUser }) {
     </button>`;
 }
 
-export function Sidebar({ view, setView, user, setUser, connected, badges }) {
-  return html`
-    <aside class="fixed inset-y-0 left-0 w-[220px] border-r border-edge bg-panel/60 backdrop-blur flex flex-col z-20">
+export function Sidebar({ view, setView, user, setUser, connected, badges, open, onClose }) {
+  return [
+    open ? html`<div onClick=${onClose} class="fixed inset-0 bg-black/50 z-30 md:hidden"></div>` : null,
+    html`
+    <aside class="fixed inset-y-0 left-0 w-[220px] border-r border-edge bg-panel/95 md:bg-panel/60 backdrop-blur flex flex-col z-40 transition-transform duration-200 ${open ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0">
       <div class="h-16 flex items-center gap-3 px-4 border-b border-edge">
         <div class="h-9 w-9 rounded-xl bg-gradient-to-br from-accent to-indigo-500 flex items-center justify-center text-ink">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
@@ -57,5 +59,6 @@ export function Sidebar({ view, setView, user, setUser, connected, badges }) {
           <span class="h-1.5 w-1.5 rounded-full ${connected ? 'bg-accent' : 'bg-slate-600'}"></span>${connected ? 'live' : 'offline · read-only'}
         </div>
       </div>
-    </aside>`;
+    </aside>`
+  ];
 }

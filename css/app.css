@@ -23,3 +23,11 @@
   input[type=date]{color-scheme:dark;cursor:pointer}
   input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.85);cursor:pointer;opacity:.8}
   input[type=date]::-webkit-calendar-picker-indicator:hover{opacity:1}
+  /* --- mobile: stack grids, tame padding, let wide content scroll instead of overflowing --- */
+  html,body{overflow-x:hidden}
+  @media (max-width:768px){
+    .grid{grid-template-columns:1fr!important}
+    .md-body{max-width:100%}
+    table{display:block;max-width:100%;overflow-x:auto;white-space:nowrap}
+    h1{font-size:1.05rem}
+  }

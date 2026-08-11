@@ -25,7 +25,9 @@ function App() {
   const s = useStore();
   const [view, setView] = useState('dashboard');
   const [who, setWho] = useState('all');
+  const [nav, setNav] = useState(false);            // mobile drawer open
   const View = VIEWS[view] || Dashboard;
+  const go = (v) => { setView(v); setNav(false); };  // pick a view, close the drawer on mobile
 
   const badges = {
     q: liveItems(s.attn.items).length,
@@ -35,10 +37,10 @@ function App() {
   };
 
   return html`
-    <${Sidebar} view=${view} setView=${setView} user=${s.user} setUser=${setUser} connected=${s.connected} badges=${badges}/>
-    <div class="ml-[220px]">
-      <${Header} title=${TITLES[view]} showWho=${view === 'feedback' || view === 'attention'} who=${who} setWho=${setWho}/>
-      <main class="p-6">
+    <${Sidebar} view=${view} setView=${go} user=${s.user} setUser=${setUser} connected=${s.connected} badges=${badges} open=${nav} onClose=${() => setNav(false)}/>
+    <div class="md:ml-[220px]">
+      <${Header} title=${TITLES[view]} showWho=${view === 'feedback' || view === 'attention'} who=${who} setWho=${setWho} onMenu=${() => setNav(true)}/>
+      <main class="p-3 md:p-6">
         <div class="fade" key=${view}><${View} who=${who}/></div>
       </main>
     </div>
