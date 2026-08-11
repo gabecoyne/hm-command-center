@@ -3,7 +3,7 @@
 import { html } from '../html.js';
 import { useState } from 'preact/hooks';
 import { useStore, getState, currentUser } from '../state.js';
-import { postDecision } from '../data.js';
+import { postDecision, postComment } from '../data.js';
 import { esc, mdToHtml, nowCT, schWhen } from '../lib/format.js';
 import { userAv, EMB, TONE } from '../lib/avatars.js';
 import { isLive, isAlert } from '../lib/attention.js';
@@ -58,6 +58,67 @@ function agentCell(m) { let crumb;
   return '<div class="flex items-center gap-2 min-w-0" title="' + esc(tip) + '">' + agentAv(m, 26) + '<div class="min-w-0 leading-tight"><div class="text-[12px] text-white truncate">' + esc(m.name) + '</div><div class="text-[10px] text-slate-400 truncate">' + crumb + '</div></div></div>'; }
 function assigneeCell(who) { if (!who) return '<span class="text-[11px] text-slate-500">—</span>'; const w = String(who).toLowerCase(); const av = (w === 'gabe' || w === 'collin') ? userAv(w, 22) : miniAv(who, 22); return '<span class="flex items-center gap-1.5 min-w-0" title="assigned to ' + esc(who) + '">' + av + '<span class="text-[11px] text-slate-300 truncate capitalize">' + esc(who) + '</span></span>'; }
 
+/* ---------- conversation: async human ↔ agent thread on any item ---------- */
+/* awaiting is derived server-side (hm_attention._derive_awaiting): "agent" once a human replies
+   (the item stays live until the producing agent answers on its next run, Contract §6), "human"
+   once the agent replies back. This is the "waiting for a response" status Gabe asked for. */
+function awaitingPill(it) {
+  if (!it || !it.awaiting) return '';
+  const m = seatForSource(it.source);
+  if (it.awaiting === 'agent')
+    return `<span class="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 whitespace-nowrap" title="You replied — ${esc(m.name)} answers on its next run">⏳ awaiting ${esc(m.name)}</span>`;
+  return `<span class="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 whitespace-nowrap" title="${esc(m.name)} replied — your move">↩ ${esc(m.name)} replied</span>`;
+}
+function threadHTML(it) {
+  const th = it.thread || []; if (!th.length) return '';
+  const m = seatForSource(it.source);
+  const rows = th.map(msg => {
+    const human = (msg.author_kind || 'human') === 'human';
+    const who = human ? String(msg.by || 'you') : m.name;
+    const av = human ? userAv(String(msg.by).toLowerCase() === 'collin' ? 'collin' : 'gabe', 22) : agentAv(m, 22);
+    const bubble = human ? 'bg-accent/10 border-accent/30' : 'bg-panel2 border-edge';
+    return `<div class="flex gap-2.5 ${human ? 'flex-row-reverse' : ''}">
+      <span class="shrink-0 mt-0.5">${av}</span>
+      <div class="min-w-0 max-w-[82%]">
+        <div class="text-[10px] text-slate-400 mb-0.5 ${human ? 'text-right' : ''}">${esc(who)} · <span class="font-mono">${esc(String(msg.ts || '').slice(0, 16).replace('T', ' '))}</span></div>
+        <div class="inline-block text-[13px] text-slate-100 border rounded-lg px-3 py-2 ${bubble} whitespace-pre-wrap">${esc(msg.text || '')}</div>
+      </div></div>`;
+  }).join('');
+  return `<div class="space-y-3">${rows}</div>`;
+}
+/* Build a ready-to-paste prompt so Gabe can jump from any item into a live Claude conversation.
+   The CC is a local web app and can't spawn a Claude session, so the button copies this to the
+   clipboard (Gabe's chosen mechanism). It carries the item's context AND the exact command the
+   agent uses to post the outcome back into the item's thread. */
+function discussPrompt(it) {
+  const m = seatForSource(it.source), type = it.type || 'approval', ap = it.approval || {};
+  const body = isAlert(it) ? (it.detail || '')
+    : [ap.question && ('Question: ' + ap.question), ap.what_i_found && ('Found: ' + ap.what_i_found),
+       ap.proposal && ('Proposal: ' + ap.proposal), ap.expected_outcome && ('Expected: ' + ap.expected_outcome),
+       ap.detail].filter(Boolean).join('\n');
+  return [
+    `I want to talk through a Command Center attention item and decide what to do about it.`, ``,
+    `Item: ${it.title || ''}`,
+    `Type: ${TL[type] || type} · Severity: ${it.severity || ''} · Owner: ${it.owner || ''}`,
+    `Agent / seat: ${m.name} (source: ${it.source || ''})`,
+    `Item ID: ${it.item_id}`,
+    body ? `\n${body}` : '', ``,
+    `Please open it (data/attention/items/${it.item_id}.json, via Scripts/hm_attention.py), give me your read, and help me decide. When we land on an answer, post it back into the item's thread so the record stays in one place:`,
+    `python3 Scripts/hm_attention.py comment --item-id ${it.item_id} --by ${it.source || '<agent-task-id>'} --text "<the outcome>" --as-agent`,
+  ].join('\n');
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; }
+  catch {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      const ok = document.execCommand('copy'); document.body.removeChild(ta); return ok;
+    } catch { return false; }
+  }
+}
+
 /* ---------- Decision log (decided approvals + acknowledged alerts) ---------- */
 const DEC_LABELS = { approved: 'Approved', rejected: 'Rejected', answered: 'Answered', changes_requested: 'Changes requested', acknowledged: 'Acknowledged', revised: 'Revised' };
 const DEC_TONE = { approved: 'bg-emerald-500/15 text-emerald-300', rejected: 'bg-rose-500/15 text-rose-300', answered: 'bg-sky-500/15 text-sky-300', changes_requested: 'bg-orange-500/15 text-orange-300', acknowledged: 'bg-slate-500/20 text-slate-300' };
@@ -69,14 +130,18 @@ function logDecidedAt(it) { const ap = it.approval || {}; return ap.decided_at |
 
 /* ---------- raw-HTML inner fragments for the rows (rendered via dangerouslySetInnerHTML) ---------- */
 function cardInner(it) { const type = it.type || 'approval'; const tl = TL[type] || type; const tc = TC[type] || 'bg-slate-700 text-slate-300'; const ap = it.approval || {};
-  const title = it.title || ''; let preview = isAlert(it) ? '' : (ap.question || ap.proposal || ap.what_i_found || ''); if (preview === title) preview = ap.proposal || ap.what_i_found || '';
+  const title = it.title || '';
+  /* Alerts now carry a real `detail` — show its first line as the preview instead of nothing
+     (the old design left the row blank and told you in the drawer the title was the whole item). */
+  let preview = isAlert(it) ? (it.detail || '') : (ap.question || ap.proposal || ap.what_i_found || ''); if (preview === title) preview = ap.proposal || ap.what_i_found || '';
+  const firstLine = String(preview || '').split('\n')[0];
   const m = seatForSource(it.source);
+  const th = (it.thread || []).length;
   return `<span class="h-2 w-2 rounded-full shrink-0 ${PRI[it.severity] || 'bg-slate-600'}" title="${esc(it.severity || '')}"></span>
     ${agentCell(m)}
     <span class="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded ${tc} justify-self-start whitespace-nowrap">${esc(tl)}</span>
-    <div class="min-w-0"><div class="text-[13px] text-white truncate">${esc(title)}</div>${preview ? `<div class="text-[11px] text-slate-400 truncate">${esc(preview)}</div>` : ''}</div>
-    ${assigneeCell(it.owner)}
-    <span class="text-[11px] text-emerald-400/80 shrink-0 justify-self-end whitespace-nowrap">${isAlert(it) ? 'Acknowledge ›' : 'Review ›'}</span>`; }
+    <div class="min-w-0"><div class="flex items-center gap-2 min-w-0"><span class="text-[13px] text-white truncate">${esc(title)}</span>${awaitingPill(it)}${th ? `<span class="text-[10px] text-slate-400 shrink-0 whitespace-nowrap" title="${th} message${th > 1 ? 's' : ''} in the conversation">💬 ${th}</span>` : ''}</div>${firstLine ? `<div class="text-[11px] text-slate-400 truncate">${esc(firstLine)}</div>` : ''}</div>
+    ${assigneeCell(it.owner)}`; }
 function logRowInner(it) { const m = seatForSource(it.source); const type = it.type || 'approval'; const tl = TL[type] || type; const tc = TC[type] || 'bg-slate-700 text-slate-300'; const ap = it.approval || {};
   const st = decisionOf(it); const dl = DEC_LABELS[st] || st; const dt = DEC_TONE[st] || 'bg-slate-600/30 text-slate-300';
   const title = it.title || ''; const sub = ap.feedback || ''; const by = ap.decided_by || it.ack_by || ''; const when = logDecidedAt(it);
@@ -89,7 +154,7 @@ function logRowInner(it) { const m = seatForSource(it.source); const type = it.t
 function historyHTML(it) { const h = (it.history || []); if (!h.length) return ''; return `<div class="text-[10px] uppercase tracking-widest text-slate-400 mb-2 mt-6">History</div><div class="space-y-2.5">${h.slice().reverse().map(e => `<div class="flex gap-2.5 text-[12px]"><span class="text-slate-500 font-mono shrink-0 w-[88px]">${esc(String(e.ts || '').slice(0, 10))}</span><div class="min-w-0"><span class="text-slate-200">${esc(e.by || '?')}</span> <span class="text-slate-400 lowercase">${esc(DEC_LABELS[e.action] || e.action || '')}</span>${e.note ? `<div class="text-slate-400 mt-0.5 whitespace-pre-wrap">${esc(e.note)}</div>` : ''}</div></div>`).join('')}</div>`; }
 function drawerBodyTop(it) { const type = it.type || 'approval'; const m = seatForSource(it.source); const ap = it.approval || {}; const bd = 'font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-white/5 text-slate-400';
   const sec = (label, val) => val ? `<div class="text-[10px] uppercase tracking-widest text-slate-400 mb-1 mt-4">${label}</div><div class="md-body">${mdToHtml(val)}</div>` : '';
-  const anyBody = ap.what_i_found || ap.proposal || ap.detail || ap.expected_outcome || ap.question;
+  const anyBody = ap.what_i_found || ap.proposal || ap.detail || ap.expected_outcome || ap.question || (isAlert(it) && it.detail);
   return `<div class="flex flex-wrap items-center gap-2 mb-1">${agentAv(m, 20)}<span class="text-[12px] text-white">${esc(m.name)}</span>${(m.director || m.manager) ? `<span class="text-[10px] text-slate-400">${[m.director, m.manager].filter(Boolean).map(esc).join(' ▸ ')}</span>` : ''}<span class="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded ${TC[type] || 'bg-slate-700 text-slate-300'}">${esc(TL[type] || type)}</span>${it.owner ? `<span class="${bd} inline-flex items-center gap-1">→ ${(String(it.owner).toLowerCase() === 'gabe' || String(it.owner).toLowerCase() === 'collin') ? userAv(String(it.owner).toLowerCase(), 16) : ''}${esc(it.owner)}</span>` : ''}${it.severity ? `<span class="${bd}">${esc(it.severity)}</span>` : ''}${it.seat ? `<span class="${bd}">${esc(String(it.seat).replace(/_/g, ' '))}</span>` : ''}<span class="text-[10px] font-mono text-slate-500">${esc(it.source || '')}</span>${it.generated_at ? `<span class="text-[11px] font-mono text-slate-400 ml-auto" title="${esc(it.generated_at)}">${esc(String(it.generated_at).slice(0, 10))}</span>` : ''}</div>
     ${it.resolves_by ? `<p class="text-[11px] font-mono text-amber-300 mt-2">Resolves by ${esc(String(it.resolves_by).slice(0, 10))}</p>` : ''}
     ${ap.question ? `<p class="text-sm text-white mt-3">${esc(ap.question)}</p>` : ''}
@@ -97,11 +162,21 @@ function drawerBodyTop(it) { const type = it.type || 'approval'; const m = seatF
     ${sec('Proposal', ap.proposal)}
     ${sec('Detail', ap.detail)}
     ${sec('Expected outcome', ap.expected_outcome)}
-    ${anyBody ? '' : `<p class="text-sm text-slate-400 mt-3">${isAlert(it) ? 'Heads-up only — the title is the whole item. Acknowledge to clear it.' : 'No extra detail was attached to this item.'}</p>`}`; }
+    ${isAlert(it) ? sec('Details', it.detail) : ''}
+    ${anyBody ? '' : `<p class="text-sm text-slate-400 mt-3">${isAlert(it) ? 'Heads-up only — acknowledge to clear it, or reply below to ask the agent about it.' : 'No extra detail was attached to this item.'}</p>`}`; }
 
 /* ---------- components ---------- */
-function QueueRow({ it, onOpen }) {
-  return html`<div class="qrow ${QGRID} px-4 py-3 hover:bg-panel2/40 cursor-pointer fade" onClick=${() => onOpen(it)} dangerouslySetInnerHTML=${{ __html: cardInner(it) }}></div>`;
+function QueueRow({ it, onOpen, onDiscuss }) {
+  const hint = isAlert(it) ? (it.awaiting === 'agent' ? 'Waiting ›' : 'Open ›') : 'Review ›';
+  /* cardInner is 5 grid cells wrapped in `display:contents`; the actions div is the 6th cell, a
+     real Preact node so the Discuss button gets a click handler (innerHTML can't). */
+  return html`<div class="qrow ${QGRID} px-4 py-3 hover:bg-panel2/40 cursor-pointer fade items-center" onClick=${() => onOpen(it)}>
+    <span class="contents" dangerouslySetInnerHTML=${{ __html: cardInner(it) }}></span>
+    <div class="flex items-center gap-2 justify-self-end shrink-0">
+      <button class="text-slate-400 hover:text-accent text-[13px] leading-none px-1" title="Copy a prompt to discuss this in Claude" onClick=${e => { e.stopPropagation(); onDiscuss(it); }}>💬</button>
+      <span class="text-[11px] text-emerald-400/80 whitespace-nowrap">${hint}</span>
+    </div>
+  </div>`;
 }
 function LogRow({ it, onOpen }) {
   return html`<div class="lrow ${LGRID} px-4 py-3 hover:bg-panel2/40 cursor-pointer fade" onClick=${() => onOpen(it)} dangerouslySetInnerHTML=${{ __html: logRowInner(it) }}></div>`;
@@ -167,16 +242,46 @@ function DecisionBlock({ it, onAck, onSave }) {
   </div>`;
 }
 
-function Drawer({ it, onClose, onAck, onSave }) {
+/* Async conversation on ANY item — the reply box keeps the item live and flips it to
+   awaiting=agent, so a replied-to alert waits for the producing agent instead of dead-ending at
+   Acknowledge. Also carries the "Discuss live in Claude" copy-prompt affordance. */
+function Conversation({ it, onReply, onDiscuss }) {
+  const [text, setText] = useState('');
+  const m = seatForSource(it.source);
+  const send = () => { const t = text.trim(); if (!t) return; onReply(it, t); setText(''); };
+  return html`<div class="border-t border-edge pt-4 mt-6">
+    <div class="flex items-center gap-2 mb-2">
+      <div class="text-[10px] uppercase tracking-widest text-slate-400">Conversation</div>
+      ${it.awaiting ? html`<span dangerouslySetInnerHTML=${{ __html: awaitingPill(it) }}></span>` : null}
+    </div>
+    ${(it.thread || []).length
+      ? html`<div dangerouslySetInnerHTML=${{ __html: threadHTML(it) }}></div>`
+      : html`<p class="text-[12px] text-slate-500">No messages yet. Reply to ask ${esc(m.name)} — it picks this up on its next run and answers here.</p>`}
+    <div class="mt-3 flex gap-2 items-start">
+      <textarea value=${text} onInput=${e => setText(e.target.value)} rows="2" class="flex-1 bg-ink border border-edge rounded-lg px-3 py-2 text-sm text-slate-200 placeholder:text-slate-400 focus:border-accent/60 focus:outline-none resize-y" placeholder=${'Reply to ' + m.name + '…'}></textarea>
+      <button class="px-3.5 py-2 rounded-lg bg-accent text-ink text-sm font-semibold hover:brightness-110 shrink-0" onClick=${send}>Send reply</button>
+    </div>
+    <button class="mt-2 text-[12px] text-slate-400 hover:text-accent" onClick=${() => onDiscuss(it)}>💬 Discuss live in Claude — copy prompt</button>
+  </div>`;
+}
+
+function Drawer({ it, onClose, onAck, onSave, onReply, onDiscuss }) {
   if (!it) return null;
   return html`
     <div class="fixed inset-0 z-30">
       <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick=${onClose}></div>
       <aside class="absolute right-0 top-0 h-full w-full sm:max-w-[580px] bg-panel border-l border-edge overflow-y-auto slidein">
-        <div class="sticky top-0 flex items-center justify-between px-5 h-14 border-b border-edge bg-panel/95 backdrop-blur z-10"><span class="text-white font-semibold">${it.title || 'Item'}</span><button class="text-slate-400 hover:text-white text-lg leading-none" onClick=${onClose}>✕</button></div>
+        <div class="sticky top-0 flex items-center justify-between gap-2 px-5 h-14 border-b border-edge bg-panel/95 backdrop-blur z-10">
+          <span class="text-white font-semibold truncate">${it.title || 'Item'}</span>
+          <div class="flex items-center gap-2 shrink-0">
+            <button class="text-[12px] text-slate-300 hover:text-accent border border-edge rounded-lg px-2 py-1 whitespace-nowrap" title="Copy a prompt to discuss this in Claude" onClick=${() => onDiscuss(it)}>💬 Discuss</button>
+            <button class="text-slate-400 hover:text-white text-lg leading-none" onClick=${onClose}>✕</button>
+          </div>
+        </div>
         <div class="p-5">
           <div dangerouslySetInnerHTML=${{ __html: drawerBodyTop(it) }}></div>
           <${DecisionBlock} it=${it} onAck=${onAck} onSave=${onSave}/>
+          <${Conversation} it=${it} onReply=${onReply} onDiscuss=${onDiscuss}/>
         </div>
       </aside>
     </div>`;
@@ -212,6 +317,26 @@ export function Attention(props) {
       banner('ok', `Acknowledged — <b>${esc(before.title || it.item_id)}</b>.`);
     } catch (e) { banner('err', 'Write failed (server running?). ' + esc(e.message)); }
   }
+  /* Reply: append a human comment. Keeps the item LIVE and flips awaiting→agent (the producing
+     agent answers on its next run, Contract §6). Works on alerts and approvals alike. The drawer
+     stays open and re-syncs to the freshly folded item so Gabe sees his message land. */
+  async function reply(it, text) {
+    const before = (getState().attn.items || []).find(i => i.item_id === it.item_id) || it;
+    try {
+      const attn = await postComment({ item_id: before.item_id, by: currentUser(), text });
+      const updated = (attn.items || []).find(i => i.item_id === before.item_id);
+      if (updated) setOpen(updated);
+      banner('ok', `Reply sent — <b>${esc(seatForSource(before.source).name)}</b> picks it up next run.`);
+    } catch (e) { banner('err', 'Reply failed (server running?). ' + esc(e.message)); }
+  }
+  /* Discuss: copy a ready-made prompt to the clipboard so Gabe can start a live Claude chat about
+     this item (the CC can't spawn a session itself). */
+  async function discuss(it) {
+    const ok = await copyText(discussPrompt(it));
+    banner(ok ? 'ok' : 'err', ok
+      ? 'Prompt copied — paste it into Claude to start the conversation.'
+      : 'Could not copy to clipboard — check browser permissions.');
+  }
 
   const items = (s.attn.items || []).filter(isLive).filter(i => who === 'all' ? true : String(i.owner || '').toLowerCase() === who).sort(qSort);
 
@@ -234,7 +359,7 @@ export function Attention(props) {
           <div class="rounded-xl border border-edge bg-panel glow overflow-hidden">
             <div class="${QGRID} px-4 py-2 text-[10px] uppercase tracking-widest text-slate-400 border-b border-edge/60"><span></span><span>Agent</span><span>Type</span><span>Item</span><span>For</span><span></span></div>
             <div class="divide-y divide-edge/60">
-              ${items.map(it => html`<${QueueRow} key=${it.item_id} it=${it} onOpen=${setOpen}/>`)}
+              ${items.map(it => html`<${QueueRow} key=${it.item_id} it=${it} onOpen=${setOpen} onDiscuss=${discuss}/>`)}
             </div>
           </div>` : html`<div class="rounded-xl border border-edge bg-panel p-10 text-center text-slate-400">Nothing needs attention${who !== 'all' ? ' for ' + who : ''}. ✓</div>`}
       </div>
@@ -275,6 +400,6 @@ export function Attention(props) {
         </div>
       </div>
 
-      <${Drawer} it=${open} onClose=${() => setOpen(null)} onAck=${ack} onSave=${save}/>
+      <${Drawer} it=${open} onClose=${() => setOpen(null)} onAck=${ack} onSave=${save} onReply=${reply} onDiscuss=${discuss}/>
     </div>`;
 }

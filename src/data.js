@@ -68,6 +68,15 @@ export async function postItem(item) {
   return attn;
 }
 
+// Post one human reply into an item's conversation. Keeps the item live and flips it to
+// awaiting=agent — the producing agent answers on its next run (Attention_Item_Contract.md §6).
+// Works on alerts and approvals alike. Returns the freshly folded queue.
+export async function postComment(rec) {
+  const attn = await aPost('/api/attention/comment', rec);
+  setState({ attn });
+  return attn;
+}
+
 // Refold from the server (used after a write conflict or on demand).
 export async function refreshAttention() {
   const r = await fetch((CONFIG.apiBase || '') + '/api/attention/state');

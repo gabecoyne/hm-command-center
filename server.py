@@ -153,7 +153,7 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         """Create-only endpoints. Nothing here overwrites an existing file."""
         p = self.path.split("?", 1)[0]
-        if p not in ("/api/attention/decision", "/api/attention/item"):
+        if p not in ("/api/attention/decision", "/api/attention/item", "/api/attention/comment"):
             return self._json(404, {"error": "no such endpoint"})
         n = int(self.headers.get("Content-Length", "0"))
         try:
@@ -164,6 +164,14 @@ class H(BaseHTTPRequestHandler):
             A = _attn()
             if p == "/api/attention/item":
                 A.append_item(body, path=str(QUEUE))
+            elif p == "/api/attention/comment":
+                # A human reply from the Command Center. Keeps the item live and flips it to
+                # awaiting=agent — the producing agent answers on its next run (Contract §6).
+                item_id, by = body.get("item_id"), body.get("by")
+                if not item_id or not by:
+                    return self._json(400, {"error": "item_id and by are required"})
+                A.record_comment(item_id, by, body.get("text") or "",
+                                 author_kind="human", path=str(QUEUE))
             else:
                 item_id, by = body.get("item_id"), body.get("by")
                 kind = body.get("kind") or "decision"
