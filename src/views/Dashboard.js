@@ -31,7 +31,7 @@ function ymNow(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth
 // monthGoal takes `model` as a param (the monolith read a module global).
 function monthGoal(model){const m=model&&model.data;if(!m)return null;const v=(m.revenue_target_by_month||{})[ymNow()];return (v==null?null:v);}
 const GRAPHS={rev:"Revenue vs Spend (14d)",roas:"Blended ROAS (14d)",chan:"Channel spend & ROAS (7d)",pace:"Pacing to daily spend floor",emailsms:"Email/SMS % of revenue"};
-function gopt(extra={}){return {responsive:true,plugins:{legend:{labels:{color:'#94a3b8',boxWidth:10,font:{size:10}}}},scales:{x:{ticks:{color:'#64748b',font:{size:9}},grid:{color:'#1c2634'}},y:{ticks:{color:'#64748b',font:{size:9}},grid:{color:'#1c2634'}},...extra}};}
+function gopt(extra={}){return {responsive:true,interaction:{mode:'index',intersect:false},hover:{mode:'index',intersect:false},plugins:{legend:{labels:{color:'#94a3b8',boxWidth:10,font:{size:10}}},tooltip:{enabled:true,mode:'index',intersect:false,backgroundColor:'rgba(15,23,42,.95)',borderColor:'#334155',borderWidth:1,titleColor:'#e2e8f0',bodyColor:'#cbd5e1',padding:8,titleFont:{size:10},bodyFont:{size:11},displayColors:true,boxWidth:8,boxHeight:8,callbacks:{label:(c)=>{const v=c.parsed.y;const n=(typeof v==='number')?(Number.isInteger(v)?v.toLocaleString():v.toLocaleString(undefined,{maximumFractionDigits:2})):v;return (c.dataset.label?c.dataset.label+': ':'')+n;}}}},scales:{x:{ticks:{color:'#64748b',font:{size:9}},grid:{color:'#1c2634'}},y:{ticks:{color:'#64748b',font:{size:9}},grid:{color:'#1c2634'}},...extra}};}
 
 // --- section builders (return HTML strings / chart configs / ask prompts) -----
 // renderTiles (line 411)
@@ -58,7 +58,7 @@ function buildKpisHtml(dash, model){
 
 // renderMktgCharts (line 431) — 4 chart configs + 4 ask prompts.
 function buildMktg(dash, model){
-  if(!dash) return {goal:null,cash:null,rev:null,roas:null,askGoal:'',askCash:'',askRev:'',askRoas:''};
+  if(!dash) return {goal:null,rev:null,roas:null,askGoal:'',askRev:'',askRoas:''};
   const k=dash.kpis,t=dash.targets||{},tr=dash.trend||{dates:[],revenue:[],spend:[],roas:[]};
   const goal=monthGoal(model);
   const now=new Date(),cmNum=now.getMonth()+1,dim=new Date(now.getFullYear(),now.getMonth()+1,0).getDate(),today=now.getDate();
@@ -69,22 +69,36 @@ function buildMktg(dash, model){
   const goalCfg={type:"line",data:{labels,datasets:[
     {label:"Actual (MTD)",data:actual,borderColor:'#34d399',backgroundColor:'rgba(52,211,153,.12)',fill:true,tension:.25,pointRadius:0,spanGaps:true},
     {label:"Plan to goal",data:expected,borderColor:'#64748b',borderDash:[5,4],pointRadius:0,tension:0}]},options:gopt()};
-  let cashCfg=null;
-  if(model&&model.data){const md=model.data,months=md.months||[],ec=md.ending_cash_by_month||{};
-    const idx=months.indexOf(ymNow()),s=Math.max(0,idx-3),e=idx<0?Math.min(months.length,12):Math.min(months.length,idx+9);
-    const win=months.slice(s,e),data=win.map(m=>ec[m]==null?null:ec[m]),pts=win.map(m=>m===ymNow()?4:0);
-    cashCfg={type:"line",data:{labels:win.map(m=>m.slice(2)),datasets:[
-      {label:"Ending cash",data:data,borderColor:'#38bdf8',backgroundColor:'rgba(56,189,248,.10)',fill:true,tension:.25,pointRadius:pts,pointBackgroundColor:'#38bdf8'}]},options:gopt()};
-  }
   const revCfg={type:"line",data:{labels:tr.dates,datasets:[{label:"Revenue",data:tr.revenue,borderColor:'#34d399',backgroundColor:'rgba(52,211,153,.1)',fill:true,tension:.3,pointRadius:0},{label:"Spend",data:tr.spend,borderColor:'#818cf8',tension:.3,pointRadius:0}]},options:gopt()};
   const target=(tr.dates||[]).map(()=>t.blended_roas);
   const roasCfg={type:"line",data:{labels:tr.dates,datasets:[{label:"ROAS",data:tr.roas,borderColor:'#fbbf24',backgroundColor:'rgba(251,191,36,.08)',fill:true,tension:.3,pointRadius:0},{label:"target",data:target,borderColor:'#64748b',borderDash:[5,4],pointRadius:0}]},options:gopt()};
   const _sum=a=>(a||[]).reduce((x,y)=>x+(+y||0),0);
   const askGoal=mkAsk("revenue pacing to the monthly goal",goal?("MTD "+usd(k.gross_mtd)+" of "+usd(goal)+" goal; "+Math.round((k.gross_mtd/(goal*today/dim))*100)+"% of plan-to-date on day "+today+"/"+dim+"."):("No model revenue goal for "+ymNow()+"."));
-  const askCash=mkAsk("the cash-flow forecast",(model&&model.data)?("Model V"+model.data.model_version+" forecast ending cash "+ymNow()+": "+usd((model.data.ending_cash_by_month||{})[ymNow()])+"; net change "+usd((model.data.net_change_by_month||{})[ymNow()])+"."):"model.json not loaded.");
   const askRev=mkAsk("the Revenue vs Spend trend (14d)","Latest ("+((tr.dates||[]).at(-1)||"n/a")+"): rev "+usd((tr.revenue||[]).at(-1))+", spend "+usd((tr.spend||[]).at(-1))+"; 14d totals rev "+usd(_sum(tr.revenue))+" / spend "+usd(_sum(tr.spend))+".");
   const askRoas=mkAsk("the Blended ROAS trend (14d) vs target","Target "+t.blended_roas+"; latest "+(((tr.roas||[]).at(-1))??"n/a")+"; 7d "+k.blended_roas_7d+"; 30d "+k.blended_roas_30d+".");
-  return {goal:goalCfg,cash:cashCfg,rev:revCfg,roas:roasCfg,askGoal,askCash,askRev,askRoas};
+  return {goal:goalCfg,rev:revCfg,roas:roasCfg,askGoal,askRev,askRoas};
+}
+
+// 12-week (~90-day) forward cash-flow forecast, weekly cadence. The model carries
+// MONTHLY ending-cash only, so this interpolates that monthly curve to weekly points
+// on a single, consistent basis (model ending cash). Purely forward-looking from today.
+function buildCashFcst(model){
+  const none=(msg)=>({cfg:null,ask:mkAsk("the 12-week cash-flow forecast",msg),has:false});
+  if(!(model&&model.data)) return none("model.json not loaded.");
+  const md=model.data, months=md.months||[], ec=md.ending_cash_by_month||{};
+  const meEnd=(ym)=>{const p=String(ym).split('-');return new Date(+p[0],+p[1],0).getTime();}; // last day of that month
+  const anchors=[]; months.forEach(m=>{ if(ec[m]!=null) anchors.push([meEnd(m),ec[m]]); });
+  anchors.sort((a,b)=>a[0]-b[0]);
+  if(anchors.length<2) return none("Not enough model months to project.");
+  const interp=(t)=>{ if(t<=anchors[0][0])return anchors[0][1]; if(t>=anchors[anchors.length-1][0])return anchors[anchors.length-1][1];
+    for(let i=1;i<anchors.length;i++){ if(t<=anchors[i][0]){const a=anchors[i-1],b=anchors[i];return a[1]+(b[1]-a[1])*((t-a[0])/(b[0]-a[0]));} } return anchors[anchors.length-1][1]; };
+  const start=new Date(); start.setHours(0,0,0,0);
+  const labels=[],data=[];
+  for(let i=0;i<=12;i++){const d=new Date(start.getTime()+i*7*86400000);labels.push((d.getMonth()+1)+'/'+d.getDate());data.push(Math.round(interp(d.getTime())));}
+  const cfg={type:"line",data:{labels,datasets:[
+    {label:"Forecast cash",data,borderColor:'#38bdf8',backgroundColor:'rgba(56,189,248,.10)',fill:true,tension:.25,pointRadius:labels.map((_,i)=>i===0?4:0),pointBackgroundColor:'#38bdf8'}]},options:gopt()};
+  const ask=mkAsk("the 12-week (90-day) cash-flow forecast","Model V"+md.model_version+" weekly ending-cash projection: "+usd(data[0])+" now \u2192 "+usd(data[data.length-1])+" in 12 weeks. Weekly points interpolated from the model's monthly ending-cash curve (the model carries monthly cadence only).");
+  return {cfg, ask, has:true};
 }
 
 // renderChannel (line 458)
@@ -98,8 +112,8 @@ function buildChannel(dash){
 // renderEmailSms (line 463)
 function buildEmailSms(life, dash){
   const lt=(life&&life.trend)||{dates:[],klaviyo:[],tw:[]},tr=(dash&&dash.trend)||{dates:[]};
-  const cfg={type:"line",data:{labels:(lt.dates&&lt.dates.length)?lt.dates:tr.dates,datasets:[{label:"Klaviyo % rev",data:lt.klaviyo||[],borderColor:'#a78bfa',backgroundColor:'rgba(167,139,250,.10)',fill:true,tension:.3,pointRadius:0},{label:"Triple Whale",data:lt.tw||[],borderColor:'#64748b',borderDash:[5,4],tension:.3,pointRadius:0}]},options:gopt()};
-  const ask=mkAsk("Email/SMS % of revenue (Klaviyo standard vs Triple Whale)",(life&&life.email_sms_pct_rev)?("Klaviyo "+fmtpct(life.email_sms_pct_rev.klaviyo)+" vs TW "+fmtpct(life.email_sms_pct_rev.tw)+" over 30d. TW under-reports ~5x; Klaviyo is the standard."):"Awaiting the Klaviyo pull (build_lifecycle_snapshot.py).");
+  const cfg={type:"line",data:{labels:(lt.dates&&lt.dates.length)?lt.dates:tr.dates,datasets:[{label:"Klaviyo % rev",data:lt.klaviyo||[],borderColor:'#a78bfa',backgroundColor:'rgba(167,139,250,.10)',fill:true,tension:.3,pointRadius:0}]},options:gopt()};
+  const ask=mkAsk("Email/SMS % of revenue (Klaviyo attribution)",(life&&life.email_sms_pct_rev)?("Klaviyo "+fmtpct(life.email_sms_pct_rev.klaviyo)+" of revenue over 30d (Klaviyo is the attribution standard)."):"Awaiting the Klaviyo pull (build_lifecycle_snapshot.py).");
   return {cfg, ask};
 }
 
@@ -204,6 +218,7 @@ export function Dashboard(props){
   // drawer open/close doesn't needlessly destroy & recreate the charts.
   const kpisHtml = useMemo(()=>buildKpisHtml(dash, model), [dash, model]);
   const mktg     = useMemo(()=>buildMktg(dash, model), [dash, model]);
+  const cashfcst = useMemo(()=>buildCashFcst(model), [model]);
   const channel  = useMemo(()=>buildChannel(dash), [dash]);
   const emailsms = useMemo(()=>buildEmailSms(life, dash), [life, dash]);
   const finance  = useMemo(()=>buildFinance(cash), [cash]);
@@ -227,9 +242,9 @@ export function Dashboard(props){
           <${ChartCanvas} id="c-goal" height=${150} config=${mktg.goal}/>
         </div>
         <div class="rounded-xl border border-edge bg-panel glow p-4 xl:col-span-2 relative">
-          <div class="absolute top-2 right-2 z-[2] flex items-center gap-1"><${AskButton} prompt=${mktg.askCash} class=${ICON_CLS}/></div>
-          <div class="text-xs text-slate-400 mb-2 pr-14">Cash-flow forecast · model ending cash</div>
-          <${ChartCanvas} id="c-cash" height=${150} config=${mktg.cash}/>
+          <div class="absolute top-2 right-2 z-[2] flex items-center gap-1"><${AskButton} prompt=${emailsms.ask} class=${ICON_CLS}/></div>
+          <div class="text-xs text-slate-400 mb-2 pr-14">Email/SMS % of revenue · trend</div>
+          <${ChartCanvas} id="c-emailsms" height=${150} config=${emailsms.cfg}/>
         </div>
         <div class="rounded-xl border border-edge bg-panel glow p-4 xl:col-span-2 relative">
           <div class="absolute top-2 right-2 z-[2] flex items-center gap-1">
@@ -248,27 +263,30 @@ export function Dashboard(props){
           <${ChartCanvas} id="c-roas" height=${150} config=${mktg.roas}/>
         </div>
       </div>
-      <div class="grid lg:grid-cols-2 gap-4 mt-4">
+      <div class="grid gap-4 mt-4">
         <div class="rounded-xl border border-edge bg-panel glow p-4 relative">
           <div class="absolute top-2 right-2 z-[2] flex items-center gap-1"><${AskButton} prompt=${channel.ask} class=${ICON_CLS}/></div>
           <div class="text-xs text-slate-400 mb-2 pr-14">Channel spend & ROAS · 7d</div>
           <div id="d-chan" dangerouslySetInnerHTML=${{ __html: channel.body }}></div>
         </div>
-        <div class="rounded-xl border border-edge bg-panel glow p-4 xl:col-span-2 relative">
-          <div class="absolute top-2 right-2 z-[2] flex items-center gap-1"><${AskButton} prompt=${emailsms.ask} class=${ICON_CLS}/></div>
-          <div class="text-xs text-slate-400 mb-2 pr-14">Email/SMS % of revenue · trend</div>
-          <${ChartCanvas} id="c-emailsms" height=${110} config=${emailsms.cfg}/>
-        </div>
       </div>
 
       <div class="flex items-center gap-3 mt-7 mb-3"><h2 class="text-sm font-semibold text-white">Cash & payables</h2><span class="text-[11px] text-slate-400" id="cash-note">${finance.cashNote}</span></div>
+      <div class="grid gap-4 mb-4">
+        <div class="rounded-xl border border-edge bg-panel glow p-4 relative">
+          <div class="absolute top-2 right-2 z-[2] flex items-center gap-1"><${AskButton} prompt=${cashfcst.ask} class=${ICON_CLS}/></div>
+          <div class="text-xs text-slate-400 mb-2 pr-14">Cash-flow forecast · 12-week (90-day) forward, weekly</div>
+          <${ChartCanvas} id="c-cashfcst" height=${140} config=${cashfcst.cfg}/>
+          ${cashfcst.has ? '' : html`<div class="text-[12px] text-slate-500 mt-2">Forecast unavailable — <code>model.json</code> not loaded.</div>`}
+        </div>
+      </div>
       <div class="grid lg:grid-cols-3 gap-4">
         <div class="rounded-xl border border-edge bg-panel glow p-4"><div class="text-xs text-slate-400 mb-2">Current balances</div><div id="d-balances" dangerouslySetInnerHTML=${{ __html: finance.balancesHtml }}></div></div>
         <div class="rounded-xl border border-edge bg-panel glow p-4 lg:col-span-2 relative">
           <div class="absolute top-2 right-2 z-[2] flex items-center gap-1"><${AskButton} prompt=${finance.ask} class=${ICON_CLS}/></div>
           <div class="text-xs text-slate-400 mb-2 pr-14">Cash (net) & payables · daily trend</div>
           <${ChartCanvas} id="c-cashtrend" height=${120} config=${finance.cashtrendCfg}/>
-          <div id="cashtrend-empty" class="text-[12px] text-slate-500 mt-2" style=${{ display: finance.hasHist ? 'none' : '' }}>No cash history yet — the daily cash collector will build this trend.</div>
+          <div id="cashtrend-empty" class="text-[12px] text-slate-500 mt-2" style=${{ display: finance.hasHist ? 'none' : '' }}>Only one snapshot so far (bootstrap) — the daily cash collector runs on-machine (Collin, QBO+Shopify) and will fill in this daily trend.</div>
         </div>
       </div>
       <div class="grid gap-4 mt-4">
