@@ -7,7 +7,7 @@ const TOP = [
   { id: 'roadmap', glyph: '▬', label: 'Product Roadmap' },
 ];
 const AGENTIC = [
-  { id: 'attention', glyph: '◎', label: 'Attention', badge: 'q', badgeCls: 'bg-amber-400/15 text-amber-300' },
+  { id: 'feedback', glyph: '◎', label: 'Feedback', badge: 'q', badgeCls: 'bg-amber-400/15 text-amber-300' },
   { id: 'reports', glyph: '▤', label: 'Reports', badge: 'r', badgeCls: 'bg-white/5 text-slate-400' },
   { id: 'agents', glyph: '⬡', label: 'Agents', badge: 'a', badgeCls: 'bg-white/5 text-slate-400' },
   { id: 'schedule', glyph: '◔', label: 'Schedule', badge: 's', badgeCls: 'bg-white/5 text-slate-400' },

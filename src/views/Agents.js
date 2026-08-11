@@ -7,6 +7,7 @@ import { aGet } from '../data.js';
 import { esc, mdToHtml } from '../lib/format.js';
 import { avatarSigil, userAv, EMB, AGENT_PERSONA } from '../lib/avatars.js';
 import { copyPrompt } from '../components/Toasts.js';
+import { isLive, isAlert } from '../lib/attention.js';
 
 /* ---------- Greek-god avatars (agents-view palette), type chips ---------- */
 const ATONE = { clay: ['#C2724A', '#0b0f17'], olive: ['#7BA05B', '#0b0f17'], blue: ['#5FA8D3', '#0b0f17'], gold: ['#D9B493', '#0b0f17'], slate: ['#94a3b8', '#0b0f17'] };
@@ -107,6 +108,116 @@ function renderChildren(parentId, depth, done) {
 /* ---------- Full skill docs cache + prompt builders ---------- */
 let _skillsMD = null;
 async function getSkillsMD() { if (_skillsMD === null) { try { _skillsMD = await aGet("skills_md.json"); } catch { _skillsMD = {}; } } return _skillsMD; }
+let _contractsMD = null;
+async function getContractsMD() { if (_contractsMD === null) { try { _contractsMD = await aGet("contracts_md.json"); } catch { _contractsMD = {}; } } return _contractsMD; }
+
+/* ---------- Feedback (attention queue) items for one agent ---------- */
+const FB_TL = { approval: 'Approval', risk: 'Risk', failure: 'Failure', performance: 'Performance' };
+const FB_TC = { approval: 'bg-indigo-500/15 text-indigo-300', risk: 'bg-amber-500/15 text-amber-300', failure: 'bg-rose-500/15 text-rose-300', performance: 'bg-sky-500/15 text-sky-300' };
+const FB_SEV = { urgent: 'bg-rose-500 ring-2 ring-rose-400/40', high: 'bg-rose-500', normal: 'bg-slate-600', med: 'bg-amber-400', low: 'bg-slate-600' };
+// An item belongs to this agent if its source resolves to the agent id; an orchestrator
+// also owns everything across its function. Directors/managers thus see their whole team's asks.
+function itemsForAgent(a) {
+  const items = (getState().attn.items || []);
+  const isOrch = String(a.role || '').includes('orchestrator');
+  return items.filter(it => {
+    const aid = _agentIdForSource(it.source);
+    if (aid && aid === a.id) return true;
+    if (isOrch && a.function) { const m = seatForSource(it.source); if (m && m.func && String(m.func).toLowerCase() === String(a.function).toLowerCase()) return true; }
+    return false;
+  });
+}
+function fbItemRow(it) {
+  const t = it.type || 'approval', ap = it.approval || {}, live = isLive(it), alert = isAlert(it);
+  const dec = alert ? (it.ack_at ? 'acknowledged' : '') : (ap.decision || '');
+  const status = live ? (alert ? 'awaiting acknowledgement' : 'awaiting your decision') : (dec ? dec.replace(/_/g, ' ') : (it.status || 'resolved'));
+  const stTone = live ? 'text-amber-300' : (dec === 'rejected' ? 'text-rose-300' : dec === 'changes_requested' ? 'text-orange-300' : 'text-emerald-300/80');
+  const preview = alert ? (ap.detail || '') : (ap.proposal || ap.what_i_found || ap.question || '');
+  return `<div class="rounded-lg border ${live ? 'border-amber-500/30 bg-amber-400/[0.03]' : 'border-edge/60 bg-panel2/30'} p-2.5 mb-1.5">
+    <div class="flex items-center gap-2">
+      <span class="h-2 w-2 rounded-full shrink-0 ${FB_SEV[it.severity] || 'bg-slate-600'}" title="${esc(it.severity || '')}"></span>
+      <span class="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded ${FB_TC[t] || 'bg-slate-700 text-slate-300'} shrink-0">${esc(FB_TL[t] || t)}</span>
+      <span class="text-[12px] text-white truncate flex-1">${esc(it.title || '')}</span>
+      <span class="text-[10px] font-mono ${stTone} shrink-0 capitalize">${esc(status)}</span>
+    </div>
+    ${preview ? `<div class="text-[11px] text-slate-400 mt-1 clamp2">${esc(preview)}</div>` : ''}
+    ${(!alert && ap.feedback) ? `<div class="text-[11px] text-slate-500 mt-1"><span class="text-slate-400">your note:</span> ${esc(ap.feedback)}</div>` : ''}
+  </div>`;
+}
+function feedbackHTML(a) {
+  const all = itemsForAgent(a); if (!all.length) return '';
+  const live = all.filter(isLive), done = all.filter(it => !isLive(it));
+  const openBlock = live.length ? live.sort((x, y) => String(x.generated_at || '').localeCompare(String(y.generated_at || ''))).map(fbItemRow).join('') : `<div class="text-xs text-slate-400 mb-1.5">Nothing open. ✓</div>`;
+  const recent = done.sort((x, y) => String(y.generated_at || '').localeCompare(String(x.generated_at || ''))).slice(0, 3);
+  const doneBlock = recent.length ? `<details class="mt-1"><summary class="text-[11px] text-slate-400 cursor-pointer hover:text-white select-none">${done.length} resolved — show recent</summary><div class="mt-2">${recent.map(fbItemRow).join('')}</div></details>` : '';
+  return `<div class="flex items-center gap-2 mb-1.5 mt-5"><div class="text-[10px] uppercase tracking-widest text-slate-400">Feedback loop</div>${live.length ? `<span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-300">${live.length} open</span>` : ''}<span class="text-[10px] text-slate-500 ml-auto">act in the Feedback tab</span></div>${openBlock}${doneBlock}`;
+}
+
+/* ---------- Hypotheses (prediction ledger → calibration snapshot) for one agent ---------- */
+function calibForAgent(a) {
+  const seats = (getState().calib && getState().calib.seats) || [];
+  const keys = new Set([a.id, a.persona, a.function, a.domain].filter(Boolean).map(x => String(x).toLowerCase()));
+  agentKeys(a).forEach(k => keys.add(k));
+  return seats.find(s => keys.has(String(s.seat || '').toLowerCase())) || null;
+}
+function hypothesesHTML(a) {
+  const c = calibForAgent(a);
+  const head = `<div class="text-[10px] uppercase tracking-widest text-slate-400 mb-1.5 mt-5">Hypotheses <span class="text-slate-500 normal-case tracking-normal">· dated, falsifiable predictions it must score itself against</span></div>`;
+  if (!c) return head + `<div class="rounded-lg border border-dashed border-edge/70 p-2.5 text-[11px] text-slate-400">No hypotheses logged yet — this seat hasn't adopted the prediction ledger (<code>Scripts/prediction_ledger.py</code>). A finding can't be wrong; a prediction can. This fills in as the agent starts recording predictions at Step 0.</div>`;
+  const hr = c.hit_rate == null ? '—' : Math.round(c.hit_rate * 100) + '%';
+  const stat = (label, val, tone) => `<span class="text-[11px] px-2 py-1 rounded-lg border border-edge ${tone || 'text-slate-300'}"><b class="text-white">${val}</b> ${label}</span>`;
+  const bar = `<div class="flex flex-wrap gap-1.5 mb-2">${stat('hit rate', hr)}${stat('open', c.open || 0)}${stat('resolved', c.resolved || 0)}${c.due_now ? stat('due now', c.due_now, 'text-amber-300 border-amber-500/40') : ''}</div>`;
+  const rows = (c.open_predictions || []).slice(0, 6).map(p => `<div class="flex items-start gap-2 py-1.5 border-t border-edge/40 first:border-0">
+      <span class="text-[10px] font-mono ${p.overdue ? 'text-amber-300' : 'text-slate-400'} mt-0.5 w-16 shrink-0">${esc(String(p.resolves_on || '').slice(0, 10) || '—')}</span>
+      <span class="text-[12px] text-slate-300 flex-1">${esc(p.subject || p.claim || '')}${p.claim != null && p.subject ? ` <span class="text-slate-500">→ ${esc(String(p.claim))}${p.unit ? ' ' + esc(p.unit) : ''}</span>` : ''}${p.overdue ? ' <span class="text-[9px] font-mono px-1 rounded bg-amber-400/15 text-amber-300">overdue</span>' : ''}</span>
+    </div>`).join('');
+  return head + bar + (rows || `<div class="text-xs text-slate-400">No open predictions.</div>`) + (c.due_now ? `<div class="text-[11px] text-amber-300/90 mt-2">${c.due_now} prediction${c.due_now === 1 ? '' : 's'} ripe but unscored — read-back debt (Step 0 owes a resolution).</div>` : '');
+}
+
+/* ---------- Contracts that govern this agent ---------- */
+const GLOBAL_CONTRACTS = [['Agent_Operating_Contract', 'Operating Contract'], ['Attention_Item_Contract', 'Feedback-loop contract'], ['Agent_Rollout_Guide', 'Rollout guide']];
+function contractsFor(a) {
+  const list = GLOBAL_CONTRACTS.slice();
+  const k = `${a.id} ${a.domain || ''} ${a.function || ''} ${a.persona || ''}`.toLowerCase();
+  if (/paid|media|nike/.test(k)) list.push(['Paid_Media_Allocation_Contract', 'Paid-media allocation']);
+  return list;
+}
+function contractsHTML(a) {
+  const rows = contractsFor(a).map(([stem, label]) => `<button data-contractmd="${esc(stem)}" class="text-left flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-edge/60 hover:bg-panel2/40"><span class="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-white/5 text-slate-400">MD</span><span class="text-[12px] text-slate-200">${esc(label)}</span><span class="text-slate-500 ml-auto text-[11px]">read ›</span></button>`).join('');
+  return `<div class="text-[10px] uppercase tracking-widest text-slate-400 mb-1.5 mt-5">Contracts — the rules it operates under</div><div class="grid sm:grid-cols-2 gap-1.5">${rows}</div>`;
+}
+
+/* ---------- Runs (run log) for one agent — did it run, succeed, what did it output ---------- */
+const RUN_TONE = { completed: 'bg-emerald-500/15 text-emerald-300', ok: 'bg-emerald-500/15 text-emerald-300', success: 'bg-emerald-500/15 text-emerald-300', failed: 'bg-rose-500/15 text-rose-300', error: 'bg-rose-500/15 text-rose-300', running: 'bg-sky-500/15 text-sky-300' };
+function runsForAgent(a) {
+  const keys = new Set(agentKeys(a));
+  return ((getState().runs && getState().runs.items) || []).filter(r => {
+    const sk = String(r.skill || r.task_id || '').toLowerCase();
+    if (sk && (keys.has(sk) || (skillBase(sk) && keys.has(skillBase(sk))))) return true;
+    const aid = _agentIdForSource(r.skill || r.task_id);
+    return aid && aid === a.id;
+  }).sort((x, y) => String(y.started_at || y.finished_at || '').localeCompare(String(x.started_at || x.finished_at || '')));
+}
+function runRow(r) {
+  const st = String(r.status || '').toLowerCase(), tone = RUN_TONE[st] || 'bg-slate-500/20 text-slate-300';
+  const when = String(r.started_at || r.finished_at || '').slice(0, 10);
+  return `<div class="py-1.5 border-t border-edge/40 first:border-0">
+    <div class="flex items-center gap-2">
+      <span class="text-[10px] font-mono text-slate-400 w-16 shrink-0">${esc(when)}</span>
+      <span class="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded ${tone} shrink-0">${esc(r.status || '—')}</span>
+      <span class="text-[12px] text-slate-300 truncate flex-1">${esc(r.task_name || r.skill || '')}</span>
+    </div>
+    ${r.key_outputs ? `<div class="text-[11px] text-slate-400 mt-0.5 clamp2 pl-[74px]">${esc(r.key_outputs)}</div>` : ''}
+    ${r.issues_flagged ? `<div class="text-[11px] text-amber-300/90 mt-0.5 clamp2 pl-[74px]">⚠ ${esc(r.issues_flagged)}</div>` : ''}
+  </div>`;
+}
+function runsHTML(a) {
+  const runs = runsForAgent(a);
+  const head = `<div class="text-[10px] uppercase tracking-widest text-slate-400 mb-1.5 mt-5">Runs — execution log</div>`;
+  const lr = a.last_run ? `<div class="text-[11px] text-slate-400 mb-1.5">Last run <span class="font-mono text-slate-300">${esc(String(a.last_run).slice(0, 16).replace('T', ' '))}</span>${a.last_run_result ? ` · <span class="text-slate-300">${esc(String(a.last_run_result))}</span>` : ''}</div>` : '';
+  if (!runs.length) return head + lr + (a.last_run ? '' : `<div class="text-xs text-slate-400">No runs logged for this agent yet.</div>`);
+  return head + lr + runs.slice(0, 5).map(runRow).join('');
+}
 function agentPrompt(a) { return `Let's review the ${a.id} agent. Its config is at ${a.skill || "(skill path)"} and it operates under Scheduled/_shared/Agent_Operating_Contract.md. Responsibility: ${a.desc || a.role || ""}. Read its skill + recent entries in Wiki/data/event_log.json and Logs/, tell me how it's performing, and whether anything should change.`; }
 function logPrompt(e, a) { return `On ${e.date || ""}, ${a ? a.id + " (" + (e.source || "") + ")" : (e.source || "an agent")} did: "${e.summary || ""}"${e.entity ? " on " + e.entity : ""}. ${e.details ? "Details: " + e.details + ". " : ""}Pull the current metrics for that entity and tell me whether this change is working and what to do next.`; }
 
@@ -149,8 +260,12 @@ function openDrawerContent(id) {
     <div class="flex flex-wrap items-center gap-2 mb-3"><span class="h-2.5 w-2.5 rounded-full ${DC[health(a, lastActive(a))[0]]}"></span>${typeChip(isOrch ? 'orchestrator' : 'agent')}<span class="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-white/5 text-slate-300">${esc(a.tier || "")}</span><span class="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded ${String(a.status || "").includes("built") ? "bg-accent/15 text-emerald-300" : "bg-white/5 text-slate-400"}">${esc(a.status || "")}</span></div>
     <div class="text-[10px] uppercase tracking-widest text-slate-400 mb-1">Responsibility</div>
     <p class="text-sm text-slate-300 leading-relaxed">${esc(a.desc || "—")}</p>${chldRow}${rep}
+    ${feedbackHTML(a)}
+    ${hypothesesHTML(a)}
     <div class="text-[10px] uppercase tracking-widest text-slate-400 mb-1.5 mt-5">Skills — click to read the full SKILL.md</div>${skRows}
-    <div class="flex items-center justify-between mb-1 mt-5"><div class="text-[10px] uppercase tracking-widest text-slate-400">Recent activity</div><button id="ag-chat" class="text-[11px] px-2 py-1 rounded-lg bg-accent/15 border border-accent/30 text-emerald-300 hover:bg-accent/25">💬 Chat about this agent</button></div>${actRows}`;
+    ${contractsHTML(a)}
+    ${runsHTML(a)}
+    <div class="flex items-center justify-between mb-1 mt-5"><div class="text-[10px] uppercase tracking-widest text-slate-400">Recent activity <span class="text-slate-500 normal-case tracking-normal">· business changes</span></div><button id="ag-chat" class="text-[11px] px-2 py-1 rounded-lg bg-accent/15 border border-accent/30 text-emerald-300 hover:bg-accent/25">💬 Chat about this agent</button></div>${actRows}`;
   return { titleHTML, bodyHTML };
 }
 
@@ -169,23 +284,49 @@ function openSkillContent(skill, backAgent, skillMd) {
   return { titleHTML, bodyHTML };
 }
 
+/* ---------- Contract SKILL.md-style drawer content (openContractContent) ---------- */
+function openContractContent(stem, backAgent, contractMd) {
+  const nice = String(stem || '').replace(/_/g, ' ');
+  const titleHTML = '<span class="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-white/5 text-slate-400">CONTRACT</span> <span class="font-mono align-middle">' + esc(nice) + '</span>';
+  let bodyHTML;
+  if (contractMd === null) {
+    bodyHTML = '<p class="text-sm text-slate-400">Loading…</p>';
+  } else {
+    const md = contractMd.md;
+    const rendered = md ? mdToHtml(md) : '<p class="text-sm text-slate-400">Contract not bundled yet — run <code>python3 CommandCenter/build_contracts_md.py</code>.</p>';
+    bodyHTML = '<div class="flex flex-wrap items-center gap-2 mb-3">' + (backAgent ? '<button id="sk-back" class="text-[11px] px-2 py-1 rounded-lg border border-edge text-slate-300 hover:text-white">← ' + esc(backAgent) + '</button>' : '') + '</div><div class="text-[10px] font-mono text-slate-500 mb-3">Scheduled/_shared/' + esc(stem) + '.md</div>' + (md ? '<div class="md-body">' + rendered + '</div>' : rendered);
+  }
+  return { titleHTML, bodyHTML };
+}
+
 function Drawer({ drawer, setDrawer, onClose }) {
   const [skillMd, setSkillMd] = useState(null);
+  const [contractMd, setContractMd] = useState(null);
   const skillKey = drawer && drawer.mode === 'skill' ? drawer.skill : null;
+  const contractKey = drawer && drawer.mode === 'contract' ? drawer.contract : null;
   useEffect(() => {
     if (!skillKey) return;
     let live = true; setSkillMd(null);
     getSkillsMD().then(all => { if (live) setSkillMd({ md: all[skillKey] }); });
     return () => { live = false; };
   }, [skillKey]);
+  useEffect(() => {
+    if (!contractKey) return;
+    let live = true; setContractMd(null);
+    getContractsMD().then(all => { if (live) setContractMd({ md: all[contractKey] }); });
+    return () => { live = false; };
+  }, [contractKey]);
 
   if (!drawer) return null;
-  const content = drawer.mode === 'skill' ? openSkillContent(drawer.skill, drawer.backAgent, skillMd) : openDrawerContent(drawer.id);
+  const content = drawer.mode === 'skill' ? openSkillContent(drawer.skill, drawer.backAgent, skillMd)
+    : drawer.mode === 'contract' ? openContractContent(drawer.contract, drawer.backAgent, contractMd)
+    : openDrawerContent(drawer.id);
   if (!content) return null;
 
   function onBodyClick(e) {
     const back = e.target.closest('#sk-back'); if (back) { setDrawer({ mode: 'agent', id: drawer.backAgent }); return; }
     const sm = e.target.closest('[data-skillmd]'); if (sm) { setDrawer({ mode: 'skill', skill: sm.dataset.skillmd, backAgent: drawer.id }); return; }
+    const cm = e.target.closest('[data-contractmd]'); if (cm) { setDrawer({ mode: 'contract', contract: cm.dataset.contractmd, backAgent: drawer.id }); return; }
     const skm = e.target.closest('[data-skill-modify]'); if (skm) { copyPrompt(typeof skillModifyPrompt !== 'undefined' ? skillModifyPrompt(skm.dataset.skillModify) : ("Open Host Modern's skill " + skm.dataset.skillModify + " (Scheduled/" + skm.dataset.skillModify + "/SKILL.md) and help me modify it. What I want to change: ")); return; }
     if (e.target.closest('#ag-chat')) { const a = agById(drawer.id); if (a) copyPrompt(agentPrompt(a)); return; }
     const cl = e.target.closest('[data-chat-log]'); if (cl) { const a = agById(drawer.id); const ev = agentActivity(a, 8)[+cl.dataset.chatLog]; if (ev) copyPrompt(logPrompt(ev, a)); return; }

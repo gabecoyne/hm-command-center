@@ -66,7 +66,7 @@ function Drawer({ r, onClose, onRead }) {
     const iid = `integrator-${day}-note-${slug}`;
     const item = {
       item_id: iid, owner: by, seat: 'integrator', type: 'approval', severity: 'normal',
-      title: ('Note on: ' + (r.title || r.id)).slice(0, 160), link: `/?view=attention&item=${iid}`,
+      title: ('Note on: ' + (r.title || r.id)).slice(0, 160), link: `/?view=feedback&item=${iid}`,
       source: r.source || 'human', generated_at: now, resolves_by: null, status: 'open', resolved_at: null, dedup_key: null, ack_at: null, ack_by: null,
       approval: { question: v, options: [], what_i_found: null, proposal: null, expected_outcome: null, detail: null, decision: 'answered', feedback: v, decided_by: by, decided_at: now, ack_at: null, ack_by: null },
     };

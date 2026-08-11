@@ -11,6 +11,8 @@ const state = {
   reports: { items: [] },
   analysis: { items: {} },
   life: null, sched: null, model: null, cash: null,
+  calib: { totals: {}, seats: [] },
+  runs: { items: [] },
   roadmap: { products: [] },
   connected: false,
   loading: true,
