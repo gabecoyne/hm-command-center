@@ -20,21 +20,23 @@ API:
     PUT  /api/data/<file.json>      → overwrite it (atomic)
     everything else                 → static files from this folder
 """
-import os, json, tempfile, posixpath
+import os, sys, json, tempfile, posixpath
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
 # The Command Center OWNS its data (approvals, questions, tasks) — writes go here only.
-DATA_DIR = Path(os.environ.get("CC_DATA", BASE / "data")).resolve()
+DATA_DIR = Path(os.environ.get("CC_DATA", BASE.parent / "data")).resolve()
 # Read-only fallback for agent-org state the CC displays but doesn't own
 # (ecomm_state.json roster + event_log.json for "last active"). Never written.
-READ_FALLBACK = Path(os.environ.get("CC_READ_FALLBACK", BASE.parent / "Wiki" / "data")).resolve()
+READ_FALLBACK = Path(os.environ.get("CC_READ_FALLBACK", BASE.parent / "data")).resolve()
 PORT = int(os.environ.get("CC_PORT", "8787"))
 API = "/api/data/"
 CTYPES = {".html": "text/html; charset=utf-8", ".js": "application/javascript",
-          ".css": "text/css", ".json": "application/json", ".svg": "image/svg+xml"}
+          ".mjs": "application/javascript", ".css": "text/css", ".json": "application/json",
+          ".svg": "image/svg+xml", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+          ".png": "image/png", ".ico": "image/x-icon", ".woff2": "font/woff2"}
 
 
 def atomic_write(path: Path, data) -> None:
@@ -67,6 +69,30 @@ def safe_static(rel: str):
     return fp
 
 
+
+# ---- attention queue: append-only records -------------------------------------------------------
+# The queue is a DIRECTORY of single-writer files, not a document:
+#   data/attention/items/{item_id}.json          the producing agent owns this file
+#   data/attention/decisions/{ts}__{machine}__…  one immutable record per decision / ack
+#   data/attention/queue.json                    generated snapshot, never authoritative
+# The UI creates one record per click. The server refuses a whole-queue write, because a client
+# holding an older snapshot would revert every decision made since it loaded and delete every item
+# filed since it loaded — which is exactly what happened on 2026-08-10.
+# Design: Doc/Engineering/HM_Shared_State_Architecture.md
+SCRIPTS = Path(os.environ.get("HM_SCRIPTS", DATA_DIR.parent / "Scripts"))
+QUEUE = DATA_DIR / "attention" / "queue.json"
+RECORD_KINDS = ("decision", "ack", "producer_ack", "status")
+
+
+def _attn():
+    """Import the fold/append helper that lives beside the data on Drive, so the fold logic has
+    exactly one implementation instead of one here and one in Scripts/."""
+    if str(SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(SCRIPTS))
+    import hm_attention
+    return hm_attention
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -85,6 +111,11 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         p = self.path.split("?", 1)[0]
+        if p == "/api/attention/state":
+            try:
+                return self._json(200, _attn().fold_state(str(QUEUE)))
+            except Exception as e:
+                return self._json(503, {"error": f"fold unavailable: {type(e).__name__}: {e}"})
         if p == "/api/health":
             return self._json(200, {"ok": True, "server": "cc", "data": str(DATA_DIR)})
         if p.startswith(API):
@@ -107,6 +138,10 @@ class H(BaseHTTPRequestHandler):
         fp = safe_in(DATA_DIR, self.path.split("?", 1)[0][len(API):])
         if not fp:
             return self._json(400, {"error": "bad path"})
+        if fp.resolve() == QUEUE.resolve():
+            return self._json(409, {
+                "error": "attention/queue.json is generated output. Whole-queue writes are refused "
+                         "because they revert other people's decisions. POST /api/attention/decision."})
         n = int(self.headers.get("Content-Length", "0"))
         try:
             body = json.loads(self.rfile.read(n) or b"null")
@@ -114,6 +149,42 @@ class H(BaseHTTPRequestHandler):
             return self._json(400, {"error": f"invalid JSON: {e}"})
         atomic_write(fp, body)
         return self._send(200, fp.read_bytes())
+
+    def do_POST(self):
+        """Create-only endpoints. Nothing here overwrites an existing file."""
+        p = self.path.split("?", 1)[0]
+        if p not in ("/api/attention/decision", "/api/attention/item", "/api/attention/comment"):
+            return self._json(404, {"error": "no such endpoint"})
+        n = int(self.headers.get("Content-Length", "0"))
+        try:
+            body = json.loads(self.rfile.read(n) or b"null") or {}
+        except Exception as e:
+            return self._json(400, {"error": f"invalid JSON: {e}"})
+        try:
+            A = _attn()
+            if p == "/api/attention/item":
+                A.append_item(body, path=str(QUEUE))
+            elif p == "/api/attention/comment":
+                # A human reply from the Command Center. Keeps the item live and flips it to
+                # awaiting=agent — the producing agent answers on its next run (Contract §6).
+                item_id, by = body.get("item_id"), body.get("by")
+                if not item_id or not by:
+                    return self._json(400, {"error": "item_id and by are required"})
+                A.record_comment(item_id, by, body.get("text") or "",
+                                 author_kind="human", path=str(QUEUE))
+            else:
+                item_id, by = body.get("item_id"), body.get("by")
+                kind = body.get("kind") or "decision"
+                if not item_id or not by:
+                    return self._json(400, {"error": "item_id and by are required"})
+                if kind not in RECORD_KINDS:
+                    return self._json(400, {"error": f"kind must be one of {RECORD_KINDS}"})
+                A.record_decision(item_id, kind, by, decision=body.get("decision"),
+                                  feedback=body.get("feedback") or "", status=body.get("status"),
+                                  path=str(QUEUE))
+            return self._json(200, A.fold_state(str(QUEUE)))
+        except Exception as e:
+            return self._json(400, {"error": f"{type(e).__name__}: {e}"})
 
 
 if __name__ == "__main__":

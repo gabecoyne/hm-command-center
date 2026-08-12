@@ -1,0 +1,10 @@
+.git
+.wrangler
+node_modules
+cloudflare
+scripts
+*.py
+*.command
+WORKFLOW.md
+.gitignore
+.assetsignore

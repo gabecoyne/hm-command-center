@@ -1,56 +1,40 @@
-# Command Center — Git Workflow
+# Command Center — Git & Update Workflow (STANDARD)
 
-**Repo:** `github.com/gabecoyne/hm-command-center` · branch `main` is the source of truth for **code**.
-**This repo tracks code only.** All runtime state (`data/*.json`, the attention queue, `ecomm_state.json`, etc.) lives on the shared Google Drive and is written by collectors and agents. Git never carries it; see `.gitignore`.
+## Run on your computer, not the cloud
 
-## Why this exists
+**Standard:** every Command Center update runs as an **on-computer** Cowork session, working directly in `~/dev/hm-command-center`.
 
-Multiple Claude conversations edit the Command Center at once. Before git, they wrote directly to the Drive copy and silently clobbered each other — that's what the pile of `index.pre-*.bak` files was. Git replaces that: each conversation works on its own branch, merges to `main`, and collisions surface as merge conflicts instead of vanishing.
+- Set it in the desktop app: **Settings → Cowork → turn OFF "Run new tasks in the cloud"** (makes on-computer the default), or per task via the **"Run this task"** picker (top-right when starting a task) → **On your computer**.
+- **Why:** on-computer sessions run on your Mac with native git + network. They `pull`, `commit`, and `push` to `main` themselves, so **the local repo AND GitHub stay in sync automatically**. Cloud sessions cannot — their bridge has no network and they can't push to un-preauthorized repos — so they leave `~/dev` stale. That staleness is the whole problem this standard removes.
 
-## Environment facts (read these — they're not obvious)
+## The repo
 
-- **Cloud sessions reach GitHub through a managed git proxy.** Stored PATs (e.g. `github_collin_config.env`) are ignored — the proxy injects credentials itself. A push only works if **this repo is in the session's authorized repository set**. If it isn't, `push` returns 403 ("not in this session's authorized repository set"). Attach the repo to the session (desktop app → connect source), or start the task with the repo connected.
-- **`device_bash` on the Mac has no network** — it cannot push or pull. All git traffic happens from the cloud container.
-- **Never put `.git` inside the Google Drive folder.** Drive File Stream corrupts git locks. Always clone into a throwaway dir (`/tmp/...`), never into `Dev/` or the Drive `CommandCenter/` folder.
+- **Local clone:** `~/dev/hm-command-center` on each machine (Gabe + Collin).
+- **Remote:** `github.com/gabecoyne/hm-command-center`, branch **`main` = source of truth for CODE**.
+- **Data is NOT in git** — it lives in the shared root `data/` pool (see `.gitignore`). Never commit data.
 
-## Per-conversation loop
+## Standard procedure for EVERY Command Center update (on-computer)
 
-Each conversation that touches the Command Center:
+Claude performs all four steps itself in an on-computer session:
 
-```bash
-# 1. Fresh isolated clone (own working tree = no toe-stepping)
-cd /tmp && rm -rf cc && git clone https://github.com/gabecoyne/hm-command-center.git cc && cd cc
-
-# 2. Branch named for the AREA you're working on
-git checkout -b cc/<area>          # e.g. cc/approvals-card, cc/schedule-view
-
-# 3. Edit code. Commit as you go.
-git add -A && git commit -m "…"
-
-# 4. Merge to main (pull first so you land on top of others' work)
-git checkout main && git pull --ff-only
-git merge cc/<area>                # resolve conflicts here if two conversations hit the same lines
-git push origin main
-git branch -d cc/<area>
-
-# 5. Deploy the merged code to Drive so server.py + Collin see it (see below)
+```
+git -C ~/dev/hm-command-center pull --ff-only     # 1. pull first — never clobber concurrent work
+# 2. make changes in ~/dev
+git add -A && git commit -m "…clear message…"     # 3. commit
+git push origin main                              # 4. push when done
 ```
 
-**Coordination rule:** one conversation, one *area* → one branch. Because they touch different parts, merges auto-resolve; git only stops you when two conversations edit the *same lines* — which is exactly the collision you want made loud.
+Never leave `~/dev` with uncommitted Command Center changes at the end of a session.
 
-> NOTE: the current code is one large `index.html`. Until it's split into per-view files, "different areas" still means "different regions of the same file," so expect occasional real conflicts. Splitting the monolith into modules is the fast-follow that makes parallel work truly clean.
+## Keeping every local repo current
 
-## Deploy: main → Drive (code only)
+- The machine you work on is current by construction (work happens in its `~/dev`).
+- For changes made **elsewhere** (the other person's machine, or a forced cloud session), a scheduled local `git -C ~/dev/hm-command-center pull --ff-only` on each Mac keeps `~/dev` synced with `main`. Set this up once per machine (launchd job or a lightweight scheduled task).
 
-The Drive `CommandCenter/` folder is the **deployed copy** that `server.py` serves and Collin sees. After merging to `main`, copy the **code files only** from a clean checkout into Drive — never touch `data/`:
+## Deploy to the live dashboard
 
-Files to deploy: `index.html`, `server.py`, `launch.command`, `build_schedule_snapshot.py`, `build_skills_md.py`, `assets/*`.
-Never deploy or overwrite: `data/` (runtime state).
+The Drive `CommandCenter/` folder is the **served** copy. "Go live" = copy the code files from `~/dev` into Drive `CommandCenter/` (leave `data/` alone — it's the shared pool). The live dashboard stays on the old version until you deploy.
 
-From a cloud session, deploy = `device_commit_files` each code file from the checkout to its path under the Drive `CommandCenter/` folder. Because `data/` is gitignored, a clean checkout has no `data/`, so a deploy physically cannot clobber state.
+## Cloud-session fallback (NOT preferred)
 
-## What NOT to do
-
-- Don't edit the Drive `CommandCenter/index.html` directly — it's deploy output, not source. Edit via the repo.
-- Don't commit anything under `data/`.
-- Don't create new `.bak` files — that's what git history is for.
+If a task is forced to run in the cloud: work in a `/tmp` clone. It **cannot** push (sandbox git proxy) or update `~/dev` (bridge has no network). Hand the change to an on-computer session to commit + push, or authorize the repo as a session source. Prefer just running on-computer.
