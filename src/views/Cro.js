@@ -145,8 +145,10 @@ function LpTable({ rows, benchmark, sources }) {
     return vb - va;
   });
 
-  const Th = ({ k, label, right }) => html`
-    <th class="${right ? 'text-right' : 'text-left'} py-2 font-normal ${sort === k ? 'text-slate-300' : ''}">
+  // First and last cells carry the horizontal gutter so the row hover still spans
+  // the full card width — padding the scroll container instead would inset it.
+  const Th = ({ k, label, right, pad }) => html`
+    <th class="${right ? 'text-right' : 'text-left'} py-2 px-3 ${pad || ''} font-normal ${sort === k ? 'text-slate-300' : ''}">
       ${k ? html`<button class="hover:text-white" onClick=${() => setSort(k)}>${label}${sort === k ? ' ▾' : ''}</button>` : label}
     </th>`;
 
@@ -174,13 +176,13 @@ function LpTable({ rows, benchmark, sources }) {
         <table class="w-full text-[13px]">
           <thead>
             <tr class="text-[10px] uppercase tracking-widest text-slate-500 border-b border-edge">
-              <${Th} label="Landing page"/>
+              <${Th} label="Landing page" pad="pl-5"/>
               <${Th} k="sessions" label="Sessions" right=${true}/>
               <${Th} k="cvr" label="CVR" right=${true}/>
               <${Th} k="rpv" label="RPV" right=${true}/>
-              <${Th} k="revenue" label="Revenue" right=${true}/>
-              ${gscOk ? html`<${Th} label="Organic" right=${true}/>` : null}
-              ${clOk ? html`<${Th} label="Friction" right=${true}/>` : null}
+              <${Th} k="revenue" label="Revenue" right=${true} pad=${(!gscOk && !clOk) ? 'pr-5' : ''}/>
+              ${gscOk ? html`<${Th} label="Organic" right=${true} pad=${clOk ? '' : 'pr-5'}/>` : null}
+              ${clOk ? html`<${Th} label="Friction" right=${true} pad="pr-5"/>` : null}
             </tr>
           </thead>
           <tbody>
@@ -190,28 +192,29 @@ function LpTable({ rows, benchmark, sources }) {
               const beatsPdp = bench.rpv != null && r.rpv != null && r.sessions >= 100;
               return html`
                 <tr class="border-b border-edge/50 hover:bg-white/[0.02]">
-                  <td class="py-2">
+                  <td class="py-2 px-3 pl-5">
                     <a href=${'https://hostmodern.co' + r.path} target="_blank" rel="noopener"
                        class="text-slate-200 hover:text-white">${r.slug}</a>
                     ${r.in_test ? html`<span class="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300">in test</span>` : null}
                     ${r.sessions === 0 ? html`<span class="ml-2 text-[10px] text-slate-600">no traffic</span>` : null}
                   </td>
-                  <td class="text-right py-2 font-mono text-slate-300">${num(r.sessions)}</td>
-                  <td class="text-right py-2 font-mono text-slate-300">${pct(r.cvr)}</td>
-                  <td class="text-right py-2 font-mono ${beatsPdp ? (r.rpv >= bench.rpv ? 'text-emerald-300' : 'text-rose-300') : 'text-white'}">${money(r.rpv)}</td>
-                  <td class="text-right py-2 font-mono text-slate-300">${r.revenue ? usd(r.revenue) : '—'}</td>
+                  <td class="text-right py-2 px-3 font-mono text-slate-300">${num(r.sessions)}</td>
+                  <td class="text-right py-2 px-3 font-mono text-slate-300">${pct(r.cvr)}</td>
+                  <td class="text-right py-2 px-3 font-mono ${beatsPdp ? (r.rpv >= bench.rpv ? 'text-emerald-300' : 'text-rose-300') : 'text-white'}">${money(r.rpv)}</td>
+                  <td class="text-right py-2 px-3 ${(!gscOk && !clOk) ? 'pr-5' : ''} font-mono text-slate-300">${r.revenue ? usd(r.revenue) : '—'}</td>
                   ${gscOk ? html`
-                    <td class="text-right py-2 font-mono text-slate-400">
+                    <td class="text-right py-2 px-3 ${clOk ? '' : 'pr-5'} font-mono text-slate-400">
                       ${g.clicks == null ? '—' : html`${num(g.clicks)}<span class="text-slate-600"> / ${num(g.impressions)}</span>`}
                       ${g.position != null ? html`<div class="text-[11px] text-slate-600">pos ${(+g.position).toFixed(1)}</div>` : null}
                     </td>` : null}
                   ${clOk ? html`
-                    <td class="text-right py-2 font-mono text-slate-400">
+                    <td class="text-right py-2 px-3 pr-5 font-mono text-slate-400">
                       ${c.scroll_depth == null ? '—' : html`${Math.round(c.scroll_depth)}%<span class="text-slate-600"> scroll</span>`}
                       ${(c.rage_clicks || c.dead_clicks) ? html`
-                        <div class="text-[11px] ${(c.rage_clicks || 0) > 0 ? 'text-amber-300/80' : 'text-slate-600'}">
+                        <div class="text-[11px] text-amber-300/80">
                           ${num(c.rage_clicks || 0)} rage · ${num(c.dead_clicks || 0)} dead
-                        </div>` : null}
+                        </div>` : (c.sessions ? html`
+                        <div class="text-[11px] text-slate-600">no rage/dead clicks</div>` : null)}
                     </td>` : null}
                 </tr>`;
             })}
