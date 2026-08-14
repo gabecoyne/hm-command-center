@@ -375,8 +375,8 @@ function PriceCard({ t }) {
 
           ${t.today_partial && t.today_partial.orders ? html`
             <div class="text-[12px] text-slate-500">
-              Today so far (excluded from the gates): ${num(t.today_partial.orders)} orders,
-              ${num(t.today_partial.units)} units, attach ${t.today_partial.attach_per_1k}/1k.
+              ${`Today so far (excluded from the gates): ${num(t.today_partial.orders)} orders, ` +
+                `${num(t.today_partial.units)} units, attach ${t.today_partial.attach_per_1k}/1k.`}
             </div>` : null}
         </div>` : null}
     </div>`;
