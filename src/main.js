@@ -16,10 +16,11 @@ import { Agents } from './views/Agents.js';
 import { Activity } from './views/Activity.js';
 import { Schedule } from './views/Schedule.js';
 import { Roadmap } from './views/Roadmap.js';
+import { Cro } from './views/Cro.js';
 
-const TITLES = { dashboard: 'Dashboard', feedback: 'Feedback', attention: 'Feedback', tasks: 'Priorities', schedule: 'Schedule', agents: 'Agents', activity: 'Activity', reports: 'Reports', roadmap: 'Product Roadmap' };
+const TITLES = { dashboard: 'Dashboard', feedback: 'Feedback', attention: 'Feedback', tasks: 'Priorities', schedule: 'Schedule', agents: 'Agents', activity: 'Activity', reports: 'Reports', roadmap: 'Product Roadmap', cro: 'CRO' };
 // `attention` kept as an alias so any old link/persisted state still resolves to Feedback.
-const VIEWS = { dashboard: Dashboard, feedback: Feedback, attention: Feedback, tasks: Tasks, agents: Agents, activity: Activity, schedule: Schedule, reports: Reports, roadmap: Roadmap };
+const VIEWS = { dashboard: Dashboard, feedback: Feedback, attention: Feedback, tasks: Tasks, agents: Agents, activity: Activity, schedule: Schedule, reports: Reports, roadmap: Roadmap, cro: Cro };
 
 function App() {
   const s = useStore();
@@ -34,6 +35,9 @@ function App() {
     r: (s.reports.items || []).filter(r => !r.read).length,
     a: (s.roster.agents || []).length,
     s: (s.sched && s.sched.tasks ? s.sched.tasks.length : 0),
+    // CRO badge counts tests at significance (a decision is waiting) and falls
+    // back to the running count when nothing is callable yet.
+    c: (s.cro && s.cro.summary ? (s.cro.summary.significant || s.cro.summary.running || 0) : 0),
   };
 
   return html`

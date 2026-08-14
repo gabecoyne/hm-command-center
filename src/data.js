@@ -18,7 +18,7 @@ export const aPut = async (p, d) => {
 export const aHealth = async () => { try { return (await fetch((CONFIG.apiBase || '') + '/api/health')).ok; } catch { return false; } };
 
 export async function load() {
-  const [attn, roster, elog, tasks, dash, inv, reports, analysis, life, sched, model, cash, calib, runs] = await Promise.all([
+  const [attn, roster, elog, tasks, dash, inv, reports, analysis, life, sched, model, cash, calib, runs, cro] = await Promise.all([
     fetch((CONFIG.apiBase || '') + '/api/attention/state').then(r => r.json())
       .catch(() => aGet('attention/queue.json').catch(() => ({ items: [] }))),
     aGet('ecomm_state.json').catch(() => ({ agents: [], schedules: {} })),
@@ -34,10 +34,11 @@ export async function load() {
     aGet('cash.json').catch(() => null),
     aGet('calibration.json').catch(() => ({ totals: {}, seats: [] })),
     aGet('runs.json').catch(() => ({ items: [] })),
+    aGet('cro_snapshot.json').catch(() => null),
   ]);
   let roadmap = getState().roadmap;
   try { roadmap = await aGet('roadmap.json'); } catch {}
-  setState({ attn, roster, elog, tasks, dash, inv, reports, analysis, life, sched, model, cash, calib, runs, roadmap, loading: false });
+  setState({ attn, roster, elog, tasks, dash, inv, reports, analysis, life, sched, model, cash, calib, runs, cro, roadmap, loading: false });
 }
 
 /* The attention queue is append-only: one file per item, one file per decision, and a generated

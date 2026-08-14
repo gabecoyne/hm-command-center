@@ -13,6 +13,7 @@ const state = {
   life: null, sched: null, model: null, cash: null,
   calib: { totals: {}, seats: [] },
   runs: { items: [] },
+  cro: null,                               // data/cro_snapshot.json — build_cro_snapshot.py
   roadmap: { products: [] },
   connected: false,
   loading: true,

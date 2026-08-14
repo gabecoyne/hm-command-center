@@ -5,6 +5,8 @@ const TOP = [
   { id: 'dashboard', glyph: '▚', label: 'Dashboard' },
   { id: 'tasks', glyph: '▦', label: 'Priorities' },
   { id: 'roadmap', glyph: '▬', label: 'Product Roadmap' },
+  // Badge is amber when a test has hit significance (see main.js `badges.c`).
+  { id: 'cro', glyph: '⇅', label: 'CRO', badge: 'c', badgeCls: 'bg-white/5 text-slate-400' },
 ];
 const AGENTIC = [
   { id: 'feedback', glyph: '◎', label: 'Feedback', badge: 'q', badgeCls: 'bg-amber-400/15 text-amber-300' },
