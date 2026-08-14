@@ -224,20 +224,211 @@ function LpTable({ rows, benchmark, sources }) {
     </div>`;
 }
 
+// ── price tests ──────────────────────────────────────────────────────────────
+// Deliberately NOT rendered as a TestCard. An A/B test is randomised, concurrent
+// and session-denominated; a price test is pre/post, order-denominated, and absorbs
+// every other change in its window. Same card shape would train the reader to give
+// them the same confidence. So: different card, and the headline is always the
+// sample gate rather than the delta until the gate actually opens.
+const PSTATE = {
+  awaiting: ['No data yet', 'bg-amber-500/15 text-amber-300 border-amber-400/25'],
+  collecting: ['Collecting', 'bg-sky-500/15 text-sky-300 border-sky-400/25'],
+  watch: ['Under threshold · not callable', 'bg-amber-500/15 text-amber-300 border-amber-400/25'],
+  callable: ['Callable · holding', 'bg-emerald-500/15 text-emerald-300 border-emerald-400/25'],
+  breached: ['Threshold breached', 'bg-rose-500/15 text-rose-300 border-rose-400/25'],
+  integrity: ['Integrity problem', 'bg-rose-500/15 text-rose-300 border-rose-400/25'],
+};
+
+// usd() from lib/format renders null as "$0", which would read as a real zero in a
+// contribution column. Blank it instead.
+const usd_ = n => (n == null || isNaN(+n)) ? '—' : usd(n);
+const dmoney = n => (n == null || isNaN(+n)) ? '—' : (+n < 0 ? '-$' : '+$') + Math.abs(+n).toFixed(2);
+
+function ProgressBar({ frac, callable }) {
+  const w = Math.max(0, Math.min(1, frac || 0)) * 100;
+  return html`
+    <div class="h-1.5 rounded-full bg-white/5 overflow-hidden">
+      <div class="h-full rounded-full ${callable ? 'bg-emerald-400/70' : 'bg-sky-400/50'}"
+           style=${`width:${w.toFixed(1)}%`}></div>
+    </div>`;
+}
+
+function PriceCard({ t }) {
+  const [open, setOpen] = useState(t.state === 'breached' || t.state === 'integrity');
+  const g = t.gates || {};
+  const b = t.baseline || {};
+  const o = t.observed || {};
+  const dl = t.delta || {};
+  const [label, cls] = PSTATE[t.state] || PSTATE.collecting;
+  // Until both gates pass, the deltas are noise wearing a number's clothes.
+  const muted = g.callable ? 'text-white' : 'text-slate-500';
+
+  const ask = mkAsk(
+    'price test ' + t.test_id,
+    `${t.label}. Changed ${t.changed_at}, measuring from ${t.measure_from}. State ${t.state}. ` +
+    `${g.orders_collected} of ${g.min_orders_to_call} orders, p=${g.p_value}, callable=${g.callable}. ` +
+    `Attach ${o.attach_per_1k} vs baseline ${b.attach_per_1k} per 1k. ASP ${o.realized_asp} vs ${b.realized_asp}. ` +
+    `Contribution/1k ${o.contribution_per_1k} vs ${b.contribution_per_1k}. ` +
+    `Threshold ${(t.thresholds || {}).alert_attach_per_1k}. ` +
+    (t.confounders || []).map(c => `Confounder: ${c.summary}`).join(' ')
+  );
+
+  const row = (k, base, obs, delta) => html`
+    <tr class="border-b border-edge/60 last:border-0">
+      <td class="py-2 text-slate-400">${k}</td>
+      <td class="text-right py-2 font-mono text-slate-400">${base}</td>
+      <td class="text-right py-2 font-mono text-slate-200">${obs}</td>
+      <td class="text-right py-2 font-mono ${muted}">${delta}</td>
+    </tr>`;
+
+  return html`
+    <div class="relative rounded-xl border ${t.state === 'breached' || t.state === 'integrity' ? 'border-rose-400/25' : 'border-edge'} bg-panel">
+      <${AskButton} prompt=${ask}/>
+      <button onClick=${() => setOpen(!open)} class="w-full text-left p-4 pr-10">
+        <div class="flex items-start gap-3 flex-wrap">
+          <span class="text-[11px] px-2 py-0.5 rounded-full border ${cls}">${label}</span>
+          <div class="min-w-0 flex-1">
+            <div class="text-white text-[15px] font-medium">${t.label}</div>
+            <div class="mt-0.5 text-[12px] text-slate-400">
+              changed ${t.changed_at} · ${t.sku_is_group ? `${t.sku.length} SKUs, measured as a group` : t.sku[0]}
+            </div>
+          </div>
+          <div class="text-right shrink-0">
+            <div class="text-[13px] text-slate-200">${t.headline}</div>
+            <div class="text-[11px] font-mono text-slate-500">
+              ${g.orders_per_day ? `${g.orders_per_day}/day · ` : ''}${t.window_days}d in
+            </div>
+          </div>
+          <span class="text-slate-500 text-xs">${open ? '▾' : '▸'}</span>
+        </div>
+        <div class="mt-3">
+          <${ProgressBar} frac=${g.progress} callable=${g.callable}/>
+          <div class="mt-1 flex justify-between text-[11px] font-mono text-slate-500">
+            <span>${num(g.orders_collected)} / ${num(g.min_orders_to_call)} orders</span>
+            <span>${g.callable ? 'both gates open' : (g.sample_met ? `sample met · p=${p_(g.p_value)}` : 'sample gate closed')}</span>
+          </div>
+        </div>
+      </button>
+
+      ${open ? html`
+        <div class="border-t border-edge p-4 space-y-3">
+          ${t.inverted_success_criterion ? html`
+            <div class="rounded-lg border border-violet-400/30 bg-violet-400/10 px-3 py-2.5 text-[12.5px] text-violet-100">
+              <span class="text-[10px] uppercase tracking-widest text-violet-300 block mb-1">Read before judging — a volume drop is the goal here</span>
+              ${t.inverted_success_criterion}
+            </div>` : null}
+
+          ${(t.confounders || []).map(c => html`
+            <div class="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2.5 text-[12.5px] text-amber-100">
+              <span class="text-[10px] uppercase tracking-widest text-amber-300 block mb-1">Confounder · ${c.date}</span>
+              <div class="font-medium">${c.summary}</div>
+              ${c.effect_on_this_test ? html`<div class="mt-1 text-amber-200/80">${c.effect_on_this_test}</div>` : null}
+            </div>`)}
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-[13px]">
+              <thead>
+                <tr class="text-[10px] uppercase tracking-widest text-slate-500 border-b border-edge">
+                  <th class="text-left py-2 font-normal">Metric</th>
+                  <th class="text-right py-2 font-normal">Baseline</th>
+                  <th class="text-right py-2 font-normal">Since ${t.measure_from}</th>
+                  <th class="text-right py-2 font-normal">${g.callable ? 'Delta' : 'Delta (not callable)'}</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${row('Attach per 1,000 orders', b.attach_per_1k, o.attach_per_1k, sgn(dl.attach_pct))}
+                ${row('Realized ASP', money(b.realized_asp), money(o.realized_asp), dmoney(dl.asp_abs))}
+                ${row('Contribution per 1,000 orders', usd_(b.contribution_per_1k), usd_(o.contribution_per_1k), sgn(dl.contribution_pct))}
+                ${row('Orders / units', num(b.orders) + ' / ' + num(b.units), num(o.orders) + ' / ' + num(o.units), '—')}
+              </tbody>
+            </table>
+          </div>
+
+          ${!g.callable ? html`
+            <div class="text-[12px] text-slate-500">
+              Not callable yet — ${num(g.min_orders_to_call - g.orders_collected)} more orders needed
+              ${g.eta_callable && g.eta_callable !== 'sample reached' ? `, roughly ${g.eta_callable} at the current rate` : ''}.
+              A pre/post price test at this sample cannot separate a real move from noise.
+            </div>` : null}
+
+          <div class="grid md:grid-cols-2 gap-3 text-[12px]">
+            <div class="rounded-lg border border-edge bg-panel2/40 px-3 py-2.5">
+              <div class="text-[10px] uppercase tracking-widest text-slate-500 mb-1">Threshold</div>
+              <div class="text-slate-300">
+                Alert at ${(t.thresholds || {}).alert_attach_per_1k}/1k
+                ${(t.thresholds || {}).alert_is_breakeven ? ' (breakeven)' : ' (widened — see rationale)'}.
+                Today ${o.attach_per_1k == null ? '—' : o.attach_per_1k}/1k.
+              </div>
+              ${(t.thresholds || {}).rationale ? html`<div class="mt-1 text-slate-500">${t.thresholds.rationale}</div>` : null}
+            </div>
+            <div class="rounded-lg border border-edge bg-panel2/40 px-3 py-2.5">
+              <div class="text-[10px] uppercase tracking-widest text-slate-500 mb-1">Price integrity</div>
+              <div class="${(t.integrity || {}).state === 'fail' ? 'text-rose-300' : 'text-slate-300'}">
+                ${(t.integrity || {}).note}
+              </div>
+              ${o.price_points ? html`
+                <div class="mt-1 font-mono text-slate-500">
+                  ${Object.entries(o.price_points).map(([pt, q]) => `$${pt}×${q}`).join(' · ')}
+                </div>` : null}
+            </div>
+          </div>
+
+          ${t.today_partial && t.today_partial.orders ? html`
+            <div class="text-[12px] text-slate-500">
+              Today so far (excluded from the gates): ${num(t.today_partial.orders)} orders,
+              ${num(t.today_partial.units)} units, attach ${t.today_partial.attach_per_1k}/1k.
+            </div>` : null}
+        </div>` : null}
+    </div>`;
+}
+
+function PriceTests({ d }) {
+  if (!d) return null;
+  const tests = d.tests || [];
+  const gen = d.generated ? new Date(d.generated).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
+
+  return html`
+    <div class="rounded-xl border border-edge bg-panel">
+      <div class="p-4 border-b border-edge flex items-baseline justify-between flex-wrap gap-2">
+        <div>
+          <div class="text-white text-[15px] font-medium">Price tests</div>
+          <div class="text-[12px] text-slate-400">
+            Pre/post, measured on attach per 1,000 orders — not randomised, not comparable to the A/B register above.
+          </div>
+        </div>
+        <div class="text-[11px] font-mono text-slate-500">${tests.length} active · updated ${gen} CT</div>
+      </div>
+      <div class="p-3 space-y-2.5">
+        ${tests.map(t => html`<${PriceCard} t=${t} key=${t.test_id}/>`)}
+        ${!tests.length ? html`
+          <div class="p-6 text-center text-slate-400 text-[13px]">
+            No active price tests. Add one to <code class="font-mono text-slate-300">data/price_tests.json</code>.
+          </div>` : null}
+        ${Object.keys(d.errors || {}).length ? html`
+          <div class="rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-[12px] text-rose-200">
+            ${Object.entries(d.errors).map(([k, v]) => `${k}: ${v}`).join(' · ')}
+          </div>` : null}
+      </div>
+    </div>`;
+}
+
 // ── view ─────────────────────────────────────────────────────────────────────
 export function Cro() {
   const s = useStore();
   const [tab, setTab] = useState('running');
   const d = s.cro;
 
+  // The A/B snapshot being absent must not hide the price panel — they have
+  // separate feeders and either can be stale without the other.
   if (!d) {
     return html`
-      <div class="max-w-[1500px]">
+      <div class="max-w-[1500px] space-y-5">
         <div class="rounded-xl border border-edge bg-panel p-10 text-center text-slate-400">
           No CRO snapshot yet. Run
           <code class="font-mono text-slate-300">TZ="America/Chicago" python3 Scripts/build_cro_snapshot.py</code>
           to write <code class="font-mono text-slate-300">data/cro_snapshot.json</code>.
         </div>
+        <${PriceTests} d=${s.price}/>
       </div>`;
   }
 
@@ -298,6 +489,8 @@ export function Cro() {
             No ${tab} tests.
           </div>` : null}
       </div>
+
+      <${PriceTests} d=${s.price}/>
 
       <${LpTable} rows=${lps} benchmark=${d.benchmark} sources=${sources}/>
     </div>`;

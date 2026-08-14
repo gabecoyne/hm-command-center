@@ -14,6 +14,7 @@ const state = {
   calib: { totals: {}, seats: [] },
   runs: { items: [] },
   cro: null,                               // data/cro_snapshot.json — build_cro_snapshot.py
+  price: null,                             // data/price_snapshot.json — build_price_snapshot.py
   roadmap: { products: [] },
   connected: false,
   loading: true,
