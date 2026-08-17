@@ -24,8 +24,13 @@ export const STATUSES = ["open","resolved","superseded","dismissed"];
 export const DECISIONS = ["approved","rejected","changes_requested","answered"];
 export const RECORD_KINDS = ["decision","ack","producer_ack","status"];
 const REQUIRED = ["item_id","owner","seat","type","severity","title","link","source","generated_at"];
+// `actor` (2026-08-17) says who EXECUTES once the item is decided — "agent" (the producer carries
+// the proposal out on approval) or "human" (approving changes nothing on its own; a person has to
+// go do it). Not a synonym for `owner`, which is who DECIDES. Without it an approval that needs
+// Gabe to go act reads exactly like one the agent will handle, so it gets approved and forgotten.
+const ACTORS = ["agent","human"];
 const APPROVAL_FIELDS = ["question","options","what_i_found","proposal","expected_outcome","detail",
-  "decision","feedback","decided_by","decided_at","ack_at","ack_by"];
+  "actor","decision","feedback","decided_by","decided_at","ack_at","ack_by"];
 export const HUMAN_APPROVAL_FIELDS = ["decision","feedback","decided_by","decided_at","ack_at","ack_by"];
 const TITLE_MAX_APPEND = 100, TITLE_MAX_FOLD = 160;
 
@@ -132,6 +137,7 @@ export function validateItem(item) {
     if (!(ap.proposal || ap.question)) throw new AttentionError("approval.proposal or approval.question is required");
     const bad = Object.keys(ap).filter((k) => !APPROVAL_FIELDS.includes(k));
     if (bad.length) throw new AttentionError(`unknown approval field(s): ${bad.sort().join(", ")}`);
+    if (ap.actor && !ACTORS.includes(ap.actor)) throw new AttentionError(`approval.actor '${ap.actor}' not allowed — use 'agent' or 'human'`);
     if (ap.decision && !DECISIONS.includes(ap.decision)) throw new AttentionError(`approval.decision '${ap.decision}' not allowed`);
     if (ap.options != null && !Array.isArray(ap.options)) throw new AttentionError("approval.options must be a list");
     for (const k of APPROVAL_FIELDS) if (!(k in ap)) ap[k] = k === "options" ? [] : null;

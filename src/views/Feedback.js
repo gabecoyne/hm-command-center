@@ -15,9 +15,47 @@ const PRI = { urgent: 'bg-rose-500 ring-2 ring-rose-400/40', high: 'bg-rose-500'
 /* the four attention types (Attention_Item_Contract.md §1). approval = decision controls; the rest are Acknowledge-only alerts. */
 const TL = { approval: 'Approval', risk: 'Risk', failure: 'Failure', performance: 'Performance' };
 const TC = { approval: 'bg-indigo-500/15 text-indigo-300', risk: 'bg-amber-500/15 text-amber-300', failure: 'bg-rose-500/15 text-rose-300', performance: 'bg-sky-500/15 text-sky-300' };
+/* WHO ACTS once you decide. This is the most consequential thing on the card and it used to be
+   nowhere: "Ask Viola to ship 4,272 glass" and "Migrate the three scripts to API 2.0" are the same
+   shape, but one needs a person to go do something and the other needs one click. An approval that
+   silently needed a human could sit approved and undone for weeks.
+   `null` renders honestly as "not stated" rather than being guessed at — guessing is the bug. */
+const ACTOR = {
+  agent: { pill: 'Agent acts', cls: 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/25',
+           line: a => `Approve and ${a} carries this out itself — nothing lands on you afterwards.`,
+           approve: a => `Approve — ${a} proceeds` },
+  human: { pill: 'You act', cls: 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-400/40',
+           line: a => `Approving does NOT make this happen — ${a} cannot do it. A person has to go and do it.`,
+           approve: () => 'Approve — I\u2019ll do it myself' },
+};
+const UNSTATED = { pill: 'Who acts?', cls: 'bg-slate-700/50 text-slate-400 ring-1 ring-slate-600/50',
+  line: a => `${a} did not say whether it will carry this out or whether you have to. Ask in a comment before approving.`,
+  approve: () => 'Approve' };
+const actorOf = it => (it && it.approval && it.approval.actor) || null;
+const actorMeta = it => ACTOR[actorOf(it)] || UNSTATED;
+
 const TYPE_RANK = { approval: 0, risk: 1, failure: 2, performance: 3 }, SEV_RANK = { urgent: 0, high: 1, normal: 2 };
 const qSort = (a, b) => ((TYPE_RANK[a.type] ?? 9) - (TYPE_RANK[b.type] ?? 9)) || ((SEV_RANK[a.severity] ?? 9) - (SEV_RANK[b.severity] ?? 9)) || String(a.generated_at || '').localeCompare(String(b.generated_at || ''));
-const QGRID = 'grid grid-cols-[20px_12px_2fr_0.9fr_3.4fr_1.3fr_auto] gap-3 items-center';
+const QGRID = 'grid grid-cols-[20px_12px_2fr_0.9fr_3.4fr_1.1fr_58px_auto] gap-3 items-center';
+
+/* Age, not date, is what you act on: "these are all a week old, clear them" is the actual workflow.
+   Compact unit ("6d" / "3w") with the real timestamp on hover, and it colours as it rots so a stale
+   block is visible without reading a single number. Thresholds match the queue's SLA bands
+   (Attention_Item_Contract.md §10: 24h urgent / 48h high / 72h normal) rounded to the week. */
+function ageDays(it) {
+  const t = Date.parse(it && it.generated_at);
+  if (!t || isNaN(t)) return null;
+  return Math.floor((Date.now() - t) / 86400000);
+}
+function ageLabel(d) {
+  if (d == null) return '—';
+  if (d <= 0) return 'today';
+  if (d === 1) return '1d';
+  if (d < 14) return d + 'd';
+  if (d < 60) return Math.floor(d / 7) + 'w';
+  return Math.floor(d / 30) + 'mo';
+}
+const ageTone = d => d == null ? 'text-slate-500' : d >= 14 ? 'text-rose-300' : d >= 7 ? 'text-amber-300' : 'text-slate-400';
 
 const ATONE = { clay: ['#C2724A', '#0b0f17'], olive: ['#7BA05B', '#0b0f17'], blue: ['#5FA8D3', '#0b0f17'], gold: ['#D9B493', '#0b0f17'], slate: ['#94a3b8', '#0b0f17'] };
 const GOD = { Hermes: ['hermes', 'clay'], Nike: ['nike', 'clay'], Apollo: ['apollo', 'clay'], Metis: ['metis', 'clay'], Iris: ['iris', 'clay'], Hera: ['hera', 'olive'], Hestia: ['hestia', 'olive'], Demeter: ['demeter', 'olive'], Athena: ['athena', 'blue'], Argus: ['argus', 'gold'], Prometheus: ['prometheus', 'gold'], Ganymede: ['ganymede', 'slate'] };
@@ -74,12 +112,14 @@ function logDecidedAt(it) { const ap = it.approval || {}; return it.dismissed_at
 /* ---------- raw-HTML inner fragments for the rows (rendered via dangerouslySetInnerHTML) ---------- */
 function cardInner(it) { const type = it.type || 'approval'; const tl = TL[type] || type; const tc = TC[type] || 'bg-slate-700 text-slate-300'; const ap = it.approval || {};
   const title = it.title || ''; let preview = isAlert(it) ? '' : (ap.question || ap.proposal || ap.what_i_found || ''); if (preview === title) preview = ap.proposal || ap.what_i_found || '';
-  const m = seatForSource(it.source);
+  const m = seatForSource(it.source); const am = actorMeta(it);
   return `<span class="h-2 w-2 rounded-full shrink-0 ${PRI[it.severity] || 'bg-slate-600'}" title="${esc(it.severity || '')}"></span>
     ${agentCell(m)}
     <span class="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded ${tc} justify-self-start whitespace-nowrap">${esc(tl)}</span>
-    <div class="min-w-0"><div class="text-[13px] text-white truncate">${esc(title)}</div>${preview ? `<div class="text-[11px] text-slate-400 truncate">${esc(preview)}</div>` : ''}</div>
+    <div class="min-w-0"><div class="text-[13px] text-white truncate">${esc(title)}</div>
+      <div class="flex items-center gap-1.5 min-w-0">${isAlert(it) ? '' : `<span class="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 ${am.cls}" title="${esc(am.line(m.name))}">${esc(am.pill)}</span>`}${preview ? `<span class="text-[11px] text-slate-400 truncate">${esc(preview)}</span>` : ''}</div></div>
     ${assigneeCell(it.owner)}
+    <span class="text-[11px] font-mono ${ageTone(ageDays(it))} justify-self-end whitespace-nowrap" title="filed ${esc(String(it.generated_at || '').replace('T', ' ').slice(0, 16))}">${esc(ageLabel(ageDays(it)))}</span>
     <span class="text-[11px] text-emerald-400/80 shrink-0 justify-self-end whitespace-nowrap">${isAlert(it) ? 'Acknowledge ›' : 'Review ›'}</span>`; }
 function logRowInner(it) { const m = seatForSource(it.source); const type = it.type || 'approval'; const tl = TL[type] || type; const tc = TC[type] || 'bg-slate-700 text-slate-300'; const ap = it.approval || {};
   const st = decisionOf(it); const dl = DEC_LABELS[st] || st; const dt = DEC_TONE[st] || 'bg-slate-600/30 text-slate-300';
@@ -95,6 +135,11 @@ function drawerBodyTop(it) { const type = it.type || 'approval'; const m = seatF
   const sec = (label, val) => val ? `<div class="text-[10px] uppercase tracking-widest text-slate-400 mb-1 mt-4">${label}</div><div class="md-body">${mdToHtml(val)}</div>` : '';
   const anyBody = ap.what_i_found || ap.proposal || ap.detail || ap.expected_outcome || ap.question;
   return `<div class="flex flex-wrap items-center gap-2 mb-1">${agentAv(m, 20)}<span class="text-[12px] text-white">${esc(m.name)}</span>${(m.director || m.manager) ? `<span class="text-[10px] text-slate-400">${[m.director, m.manager].filter(Boolean).map(esc).join(' ▸ ')}</span>` : ''}<span class="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded ${TC[type] || 'bg-slate-700 text-slate-300'}">${esc(TL[type] || type)}</span>${it.owner ? `<span class="${bd} inline-flex items-center gap-1">→ ${(String(it.owner).toLowerCase() === 'gabe' || String(it.owner).toLowerCase() === 'collin') ? userAv(String(it.owner).toLowerCase(), 16) : ''}${esc(it.owner)}</span>` : ''}${it.severity ? `<span class="${bd}">${esc(it.severity)}</span>` : ''}${it.seat ? `<span class="${bd}">${esc(String(it.seat).replace(/_/g, ' '))}</span>` : ''}<span class="text-[10px] font-mono text-slate-500">${esc(it.source || '')}</span>${it.generated_at ? `<span class="text-[11px] font-mono text-slate-400 ml-auto" title="${esc(it.generated_at)}">${esc(String(it.generated_at).slice(0, 10))}</span>` : ''}</div>
+    ${isAlert(it) ? '' : (() => { const am = actorMeta(it); const a = actorOf(it);
+      const tone = a === 'human' ? 'border-amber-400/40 bg-amber-500/10' : a === 'agent' ? 'border-emerald-500/30 bg-emerald-500/[.07]' : 'border-slate-600/50 bg-slate-700/20';
+      return `<div class="mt-3 rounded-lg border ${tone} px-3 py-2 flex items-start gap-2">
+        <span class="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${am.cls}">${esc(am.pill)}</span>
+        <span class="text-[12px] text-slate-200 leading-snug">${esc(am.line(m.name))}</span></div>`; })()}
     ${it.resolves_by ? `<p class="text-[11px] font-mono text-amber-300 mt-2">Resolves by ${esc(String(it.resolves_by).slice(0, 10))}</p>` : ''}
     ${ap.question ? `<p class="text-sm text-white mt-3">${esc(ap.question)}</p>` : ''}
     ${sec('What the agent found', ap.what_i_found)}
@@ -132,7 +177,7 @@ function Controls({ it, onAck, onSave }) {
   if (isAlert(it)) {
     return html`<div class="flex flex-wrap gap-2 items-center"><button class=${pb} onClick=${() => onAck(it)}>Acknowledge</button><span class="text-[11px] text-slate-400 max-w-[380px]">Heads-up only — nothing to decide. If this needs action, the producing agent should have filed an approval.</span></div>`;
   }
-  const ap = it.approval || {}; const opts = (ap.options || []);
+  const ap = it.approval || {}; const opts = (ap.options || []); const am = actorMeta(it); const who = actorOf(it);
   /* The note is a pre-fill field and these buttons save immediately, so an empty-note click used to write
      a decision with feedback:'' — a dead end for the producing agent's read-back (Attention_Item_Contract.md
      §6: changes_requested means fold the feedback into a revised proposal, rejected means record the
@@ -153,8 +198,10 @@ function Controls({ it, onAck, onSave }) {
         ${opts.map(o => html`<label class="flex items-center gap-2.5 text-sm text-slate-200 px-3 py-2 rounded-lg border border-edge hover:border-slate-600 cursor-pointer"><input type="radio" name=${rn} value=${o} class="accent-accent" checked=${choice === o} onChange=${() => setChoice(o)}/> ${o}</label>`)}
       </div>
       <div class="flex gap-2 mb-3"><input value=${anote} onInput=${e => setANote(e.target.value)} class=${inp} placeholder="Optional note…"/><button class=${pb} onClick=${answer}>Save answer</button></div>` : null}
+    ${who === 'human' ? html`<p class="text-[12px] text-amber-200/90 mb-2">Approving this only records the decision — ${seatForSource(it.source).name} will not act on it. The work is yours.</p>`
+      : who ? null : html`<p class="text-[12px] text-slate-400 mb-2">${seatForSource(it.source).name} didn’t say who carries this out. If that matters, comment and ask before approving.</p>`}
     <div class="flex flex-wrap gap-2 items-center">
-      <button class=${pb} onClick=${() => onSave(it, { decision: 'approved', feedback: note.trim() })}>Approve</button>
+      <button class=${pb} onClick=${() => onSave(it, { decision: 'approved', feedback: note.trim() })}>${am.approve(seatForSource(it.source).name)}</button>
       <button class="px-3.5 py-2 rounded-lg border border-edge text-slate-300 text-sm hover:border-rose-500/60 hover:text-rose-300" onClick=${() => decide('rejected', "Add a note first — say why you're rejecting. The agent reads it back and won't re-propose.")}>Reject</button>
       <input value=${note} onInput=${e => { setNote(e.target.value); if (noteErr) setNoteErr(false); }} class=${inp} style=${noteErr ? 'border-color:#f43f5e' : ''} placeholder="Note — required to reject or request changes…"/>
       <button class="px-3.5 py-2 rounded-lg border border-edge text-slate-400 text-sm hover:text-white" onClick=${() => decide('changes_requested', "Add a note first — say what's wrong or what to change. The agent re-files from that note.")}>Request changes</button>
@@ -209,6 +256,9 @@ function Drawer({ it, onClose, onAck, onSave, onDismiss }) {
 const TYPE_FILTERS = [
   ['all', 'All types'],
   ['decide', 'Needs a decision'],
+  ['act_human', '· that YOU must do'],
+  ['act_agent', '· the agent will do'],
+  ['act_unknown', '· who acts unstated'],
   ['alert', 'Alerts (FYI)'],
   ['approval', '· Approval'],
   ['risk', '· Risk'],
@@ -219,8 +269,20 @@ function typeMatches(it, f) {
   if (f === 'all') return true;
   if (f === 'decide') return !isAlert(it);
   if (f === 'alert') return isAlert(it);
+  // "what does this want from me" is the same question as type, so the actor cuts live here
+  // rather than in yet another dropdown.
+  if (f === 'act_human') return !isAlert(it) && actorOf(it) === 'human';
+  if (f === 'act_agent') return !isAlert(it) && actorOf(it) === 'agent';
+  if (f === 'act_unknown') return !isAlert(it) && !actorOf(it);
   return (it.type || '') === f;
 }
+/* Age buckets exist to support one specific move: "everything here is a week old — select all,
+   archive." Filtering to the stale set first is what makes select-all safe to click. */
+const AGE_FILTERS = [['all', 'Any age'], ['3', 'Older than 3 days'], ['7', 'Older than a week'], ['14', 'Older than 2 weeks'], ['30', 'Older than a month']];
+const SORTS = [['priority', 'Sort: priority'], ['oldest', 'Sort: oldest first'], ['newest', 'Sort: newest first']];
+const byAge = dir => (a, b) => dir * String(a.generated_at || '').localeCompare(String(b.generated_at || ''));
+const sortFor = k => k === 'oldest' ? byAge(1) : k === 'newest' ? byAge(-1) : qSort;
+
 const SEL = 'bg-ink border border-edge rounded-lg px-2.5 py-1.5 text-[13px] text-slate-200 focus:border-accent/60 focus:outline-none';
 
 export function Feedback(props) {
@@ -237,6 +299,8 @@ export function Feedback(props) {
   const [fPerson, setFPerson] = useState(who);
   const [fAgent, setFAgent] = useState('all');
   const [fType, setFType] = useState('all');
+  const [fAge, setFAge] = useState('all');
+  const [qSortKey, setQSortKey] = useState('priority');
   const [sel, setSel] = useState(() => new Set());
   const [busy, setBusy] = useState(false);
   useEffect(() => { setFPerson(who); }, [who]);
@@ -289,6 +353,8 @@ export function Feedback(props) {
   }
 
   const live = (s.attn.items || []).filter(isLive);
+  const staleCount = live.filter(i => (ageDays(i) ?? 0) >= 7).length;
+  const youActCount = live.filter(i => !isAlert(i) && actorOf(i) === 'human').length;
   /* Agent options come from the items actually in the queue, not a hardcoded roster — a filter
      listing agents with nothing to show is noise, and one missing an agent hides work. */
   const agentOpts = useMemo(() => {
@@ -301,6 +367,7 @@ export function Feedback(props) {
     if (fPerson !== 'all' && String(it.owner || '').toLowerCase() !== fPerson) return false;
     if (fAgent !== 'all' && seatForSource(it.source).name !== fAgent) return false;
     if (!typeMatches(it, fType)) return false;
+    if (fAge !== 'all') { const d = ageDays(it); if (d == null || d < +fAge) return false; }
     if (qSearch) {
       const ap = it.approval || {};
       const hay = [it.title, it.detail, ap.question, ap.proposal, ap.what_i_found, ap.expected_outcome,
@@ -310,8 +377,8 @@ export function Feedback(props) {
     }
     return true;
   };
-  const items = live.filter(qMatch).sort(qSort);
-  const filtered = items.length !== live.length;
+  const items = live.filter(qMatch).sort(sortFor(qSortKey));
+  const filtered = items.length !== live.length || qSortKey !== 'priority';
   const visibleIds = items.map(i => i.item_id);
   const selIds = visibleIds.filter(id => sel.has(id));           // never act on a hidden selection
   const selItems = items.filter(i => sel.has(i.item_id));
@@ -324,7 +391,7 @@ export function Feedback(props) {
     if (allSel) visibleIds.forEach(id => n.delete(id)); else visibleIds.forEach(id => n.add(id));
     return n;
   });
-  const resetFilters = () => { setQSearch(''); setFPerson('all'); setFAgent('all'); setFType('all'); };
+  const resetFilters = () => { setQSearch(''); setFPerson('all'); setFAgent('all'); setFType('all'); setFAge('all'); setQSortKey('priority'); };
 
   const allDecided = (s.attn.items || []).filter(i => !!decisionOf(i)).slice().sort((a, b) => String(logDecidedAt(b)).localeCompare(String(logDecidedAt(a))));
   const matches = it => { const ap = it.approval || {}, d = decisionOf(it);
@@ -360,7 +427,19 @@ export function Feedback(props) {
         <select class=${SEL} value=${fType} onChange=${e => setFType(e.target.value)} title="What the item wants from you">
           ${TYPE_FILTERS.map(([v, l]) => html`<option key=${v} value=${v}>${l}</option>`)}
         </select>
-        <span class="text-[11px] font-mono text-slate-400 whitespace-nowrap">${items.length}${filtered ? ' of ' + live.length : ''}</span>
+        <select class=${SEL} value=${fAge} onChange=${e => setFAge(e.target.value)} title="How long it has been sitting here">
+          ${AGE_FILTERS.map(([v, l]) => html`<option key=${v} value=${v}>${l}</option>`)}
+        </select>
+        <select class=${SEL} value=${qSortKey} onChange=${e => setQSortKey(e.target.value)} title="Row order">
+          ${SORTS.map(([v, l]) => html`<option key=${v} value=${v}>${l}</option>`)}
+        </select>
+        <span class="text-[11px] font-mono text-slate-400 whitespace-nowrap">${items.length}${items.length !== live.length ? ' of ' + live.length : ''}</span>
+        ${(fType === 'all' && youActCount > 0) ? html`<button class="text-[11px] text-amber-200 hover:text-amber-100 whitespace-nowrap underline decoration-dotted underline-offset-2"
+            title="Approving these does nothing on its own — they need you to go and do something"
+            onClick=${() => setFType('act_human')}>${youActCount} need you to act ›</button>` : null}
+        ${(fAge === 'all' && staleCount > 0) ? html`<button class="text-[11px] text-amber-300/90 hover:text-amber-200 whitespace-nowrap underline decoration-dotted underline-offset-2"
+            title="Filter to everything older than a week, then select all and archive"
+            onClick=${() => { setFAge('7'); setQSortKey('oldest'); }}>${staleCount} over a week old ›</button>` : null}
         ${filtered ? html`<button class=${btn} onClick=${resetFilters}>Clear filters</button>` : null}
       </div>
 
@@ -381,7 +460,7 @@ export function Feedback(props) {
           <div class="rounded-xl border border-edge bg-panel glow overflow-hidden">
             <div class="${QGRID} px-4 py-2 text-[10px] uppercase tracking-widest text-slate-400 border-b border-edge/60">
               <input type="checkbox" class="accent-accent h-3.5 w-3.5 cursor-pointer" checked=${allSel} aria-label="Select all shown" onChange=${toggleAll}/>
-              <span></span><span>Agent</span><span>Type</span><span>Item</span><span>For</span><span></span>
+              <span></span><span>Agent</span><span>Type</span><span>Item</span><span>For</span><span class="justify-self-end">Age</span><span></span>
             </div>
             <div class="divide-y divide-edge/60">
               ${items.map(it => html`<${QueueRow} key=${it.item_id} it=${it} onOpen=${setOpen} selected=${sel.has(it.item_id)} onToggle=${toggle}/>`)}
