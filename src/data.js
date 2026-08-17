@@ -65,6 +65,15 @@ export async function postDecision(rec) {
   return attn;
 }
 
+// Record the SAME response across many items in one round trip (bulk acknowledge / dismiss).
+// One record per item is still written server-side; only the fold is shared, which is what makes
+// clearing a large backlog fast enough that people actually do it.
+export async function postBulkDecision(rec) {
+  const attn = await aPost('/api/attention/decision', rec);
+  setState({ attn });
+  return attn;
+}
+
 // File one new item (e.g. a note from the Reports drawer).
 export async function postItem(item) {
   const attn = await aPost('/api/attention/item', item);

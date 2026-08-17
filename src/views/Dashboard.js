@@ -30,13 +30,18 @@ function toneCls(good){return good?'bg-accent':'bg-rose-500';}
 function ymNow(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');}
 // monthGoal takes `model` as a param (the monolith read a module global).
 function monthGoal(model){const m=model&&model.data;if(!m)return null;const v=(m.revenue_target_by_month||{})[ymNow()];return (v==null?null:v);}
-const GRAPHS={rev:"Revenue vs Spend (14d)",roas:"Blended ROAS (14d)",chan:"Channel spend & ROAS (7d)",pace:"Pacing to daily spend floor",emailsms:"Email/SMS % of revenue"};
+const GRAPHS={rev:"Revenue vs Spend (14d)",roas:"Blended ROAS (14d, gross sales / paid spend — matches Triple Whale)",chan:"Channel spend & ROAS (7d)",pace:"Pacing to daily spend floor",emailsms:"Email/SMS % of revenue"};
 function gopt(extra={}){return {responsive:true,interaction:{mode:'index',intersect:false},hover:{mode:'index',intersect:false},plugins:{legend:{labels:{color:'#94a3b8',boxWidth:10,font:{size:10}}},tooltip:{enabled:true,mode:'index',intersect:false,backgroundColor:'rgba(15,23,42,.95)',borderColor:'#334155',borderWidth:1,titleColor:'#e2e8f0',bodyColor:'#cbd5e1',padding:8,titleFont:{size:10},bodyFont:{size:11},displayColors:true,boxWidth:8,boxHeight:8,callbacks:{label:(c)=>{const v=c.parsed.y;const n=(typeof v==='number')?(Number.isInteger(v)?v.toLocaleString():v.toLocaleString(undefined,{maximumFractionDigits:2})):v;return (c.dataset.label?c.dataset.label+': ':'')+n;}}}},scales:{x:{ticks:{color:'#64748b',font:{size:9}},grid:{color:'#1c2634'}},y:{ticks:{color:'#64748b',font:{size:9}},grid:{color:'#1c2634'}},...extra}};}
 
 // --- section builders (return HTML strings / chart configs / ask prompts) -----
 // renderTiles (line 411)
-function buildKpisHtml(dash, model){
-  if(!dash) return `<div class="col-span-full text-slate-400 text-sm">No <code>dashboard.json</code> yet — run <code>build_dashboard_snapshot.py</code>.</div>`;
+function buildKpisHtml(dash, model, loading){
+  // Cold D1 reads take a few seconds. Saying "no dashboard.json yet — run the script" during that
+  // window sent people off to debug a feeder that was working (2026-08-17). Say "loading" instead,
+  // and only claim the snapshot is missing once the load has actually finished.
+  if(!dash) return loading
+    ? `<div class="col-span-full text-slate-400 text-sm animate-pulse">Loading the latest snapshot…</div>`
+    : `<div class="col-span-full text-slate-400 text-sm">No <code>dashboard.json</code> yet — run <code>build_dashboard_snapshot.py</code>.</div>`;
   const k=dash.kpis,t=dash.targets||{};
   const goal=monthGoal(model);
   const now=new Date(),dom=now.getDate(),dim=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
@@ -47,7 +52,7 @@ function buildKpisHtml(dash, model){
   const netCh=md?((md.net_change_by_month||{})[cm]):null;
   const tiles=[
     kpi("Revenue MTD → goal",usd(k.gross_mtd),goal?("of "+usd(goal)+" · pace "+pace+"%"):"no model goal set",goal?toneCls(pace>=100):'bg-slate-500'),
-    kpi("Blended ROAS 7d",k.blended_roas_7d?.toFixed(2),`target ${t.blended_roas} · 30d ${k.blended_roas_30d}`,toneCls(k.blended_roas_7d>=t.blended_roas)),
+    kpi("Blended ROAS 7d",k.blended_roas_7d?.toFixed(2),`target ${t.blended_roas} · 30d ${k.blended_roas_30d}`+(k.attributed_roas_7d!=null?` · attr ${k.attributed_roas_7d}`:``),toneCls(k.blended_roas_7d>=t.blended_roas)),
     kpi("Spend / day 7d",usd(k.spend_day_7d),`floor ${usd(t.spend_floor_day)}`,toneCls(k.spend_day_7d>=t.spend_floor_day)),
     kpi("Cash · forecast EOM",endCash!=null?usd(endCash):"—",netCh!=null?("net "+(netCh>=0?'+':'')+usd(netCh)+" this mo"):("model V"+(md?md.model_version:"?")),endCash==null?'bg-slate-500':toneCls((netCh||0)>=0)),
     kpi("Meta ROAS 7d",k.meta_roas_7d?.toFixed(2),usd(k.meta_spend_7d)+" spend",toneCls(k.meta_roas_7d>=t.blended_roas)),
@@ -71,11 +76,14 @@ function buildMktg(dash, model){
     {label:"Plan to goal",data:expected,borderColor:'#64748b',borderDash:[5,4],pointRadius:0,tension:0}]},options:gopt()};
   const revCfg={type:"line",data:{labels:tr.dates,datasets:[{label:"Revenue",data:tr.revenue,borderColor:'#34d399',backgroundColor:'rgba(52,211,153,.1)',fill:true,tension:.3,pointRadius:0},{label:"Spend",data:tr.spend,borderColor:'#818cf8',tension:.3,pointRadius:0}]},options:gopt()};
   const target=(tr.dates||[]).map(()=>t.blended_roas);
-  const roasCfg={type:"line",data:{labels:tr.dates,datasets:[{label:"ROAS",data:tr.roas,borderColor:'#fbbf24',backgroundColor:'rgba(251,191,36,.08)',fill:true,tension:.3,pointRadius:0},{label:"target",data:target,borderColor:'#64748b',borderDash:[5,4],pointRadius:0}]},options:gopt()};
+  const roasDs=[{label:"Blended (TW)",data:tr.roas,borderColor:'#fbbf24',backgroundColor:'rgba(251,191,36,.08)',fill:true,tension:.3,pointRadius:0}];
+  if((tr.attr_roas||[]).length) roasDs.push({label:"Paid-attributed",data:tr.attr_roas,borderColor:'#818cf8',borderDash:[3,3],fill:false,tension:.3,pointRadius:0});
+  roasDs.push({label:"target",data:target,borderColor:'#64748b',borderDash:[5,4],pointRadius:0});
+  const roasCfg={type:"line",data:{labels:tr.dates,datasets:roasDs},options:gopt()};
   const _sum=a=>(a||[]).reduce((x,y)=>x+(+y||0),0);
   const askGoal=mkAsk("revenue pacing to the monthly goal",goal?("MTD "+usd(k.gross_mtd)+" of "+usd(goal)+" goal; "+Math.round((k.gross_mtd/(goal*today/dim))*100)+"% of plan-to-date on day "+today+"/"+dim+"."):("No model revenue goal for "+ymNow()+"."));
   const askRev=mkAsk("the Revenue vs Spend trend (14d)","Latest ("+((tr.dates||[]).at(-1)||"n/a")+"): rev "+usd((tr.revenue||[]).at(-1))+", spend "+usd((tr.spend||[]).at(-1))+"; 14d totals rev "+usd(_sum(tr.revenue))+" / spend "+usd(_sum(tr.spend))+".");
-  const askRoas=mkAsk("the Blended ROAS trend (14d) vs target","Target "+t.blended_roas+"; latest "+(((tr.roas||[]).at(-1))??"n/a")+"; 7d "+k.blended_roas_7d+"; 30d "+k.blended_roas_30d+".");
+  const askRoas=mkAsk("the Blended ROAS trend (14d) vs target","Blended ROAS here = gross sales / paid spend, the same basis Triple Whale's dashboard uses (totalRoas). Target "+t.blended_roas+"; latest "+(((tr.roas||[]).at(-1))??"n/a")+"; 7d "+k.blended_roas_7d+"; 30d "+k.blended_roas_30d+". Paid-attributed (platform-reported conversion value / spend) 7d: "+(k.attributed_roas_7d??"n/a")+".");
   return {goal:goalCfg,rev:revCfg,roas:roasCfg,askGoal,askRev,askRoas};
 }
 
@@ -216,7 +224,7 @@ export function Dashboard(props){
 
   // Build all section content; memoized on the state slices each one reads so a
   // drawer open/close doesn't needlessly destroy & recreate the charts.
-  const kpisHtml = useMemo(()=>buildKpisHtml(dash, model), [dash, model]);
+  const kpisHtml = useMemo(()=>buildKpisHtml(dash, model, s.loading), [dash, model, s.loading]);
   const mktg     = useMemo(()=>buildMktg(dash, model), [dash, model]);
   const cashfcst = useMemo(()=>buildCashFcst(model), [model]);
   const channel  = useMemo(()=>buildChannel(dash), [dash]);
@@ -259,7 +267,7 @@ export function Dashboard(props){
             <button type="button" onClick=${()=>setGkey('roas')} title="Analyst write-up" aria-label="Analysis" class=${ICON_CLS}>${ANALYSIS_SVG}</button>
             <${AskButton} prompt=${mktg.askRoas} class=${ICON_CLS}/>
           </div>
-          <div class="text-xs text-slate-400 mb-2 pr-14">Blended ROAS · 14d (target dashed)</div>
+          <div class="text-xs text-slate-400 mb-2 pr-14">Blended ROAS · 14d <span class="text-slate-500">— gross sales / paid spend, same basis as Triple Whale</span></div>
           <${ChartCanvas} id="c-roas" height=${150} config=${mktg.roas}/>
         </div>
       </div>

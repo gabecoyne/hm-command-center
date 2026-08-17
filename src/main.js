@@ -41,7 +41,7 @@ function App() {
   };
 
   return html`
-    <${Sidebar} view=${view} setView=${go} user=${s.user} setUser=${setUser} connected=${s.connected} badges=${badges} open=${nav} onClose=${() => setNav(false)}/>
+    <${Sidebar} view=${view} setView=${go} user=${s.user} setUser=${setUser} connected=${s.connected} loading=${s.loading} badges=${badges} open=${nav} onClose=${() => setNav(false)}/>
     <div class="md:ml-[220px]">
       <${Header} title=${TITLES[view]} showWho=${view === 'feedback' || view === 'attention'} who=${who} setWho=${setWho} onMenu=${() => setNav(true)}/>
       <main class="p-3 md:p-6">

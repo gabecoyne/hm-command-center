@@ -35,7 +35,7 @@ function UserBtn({ id, label, user, setUser }) {
     </button>`;
 }
 
-export function Sidebar({ view, setView, user, setUser, connected, badges, open, onClose }) {
+export function Sidebar({ view, setView, user, setUser, connected, loading, badges, open, onClose }) {
   return [
     open ? html`<div onClick=${onClose} class="fixed inset-0 bg-black/50 z-30 md:hidden"></div>` : null,
     html`
@@ -58,7 +58,7 @@ export function Sidebar({ view, setView, user, setUser, connected, badges, open,
           <${UserBtn} id="collin" label="Collin" user=${user} setUser=${setUser}/>
         </div>
         <div class="mt-2 flex items-center gap-1.5 text-[11px] font-mono">
-          <span class="h-1.5 w-1.5 rounded-full ${connected ? 'bg-accent' : 'bg-slate-600'}"></span>${connected ? 'live' : 'offline · read-only'}
+          <span class="h-1.5 w-1.5 rounded-full ${connected ? 'bg-accent' : (loading ? 'bg-amber-400 animate-pulse' : 'bg-slate-600')}"></span>${connected ? 'live' : (loading ? 'connecting…' : 'offline · read-only')}
         </div>
       </div>
     </aside>`

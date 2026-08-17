@@ -16,7 +16,11 @@ export const SEATS = ["paid_media","brand","ecommerce","lifecycle","marketing_an
 export const TYPES = ["approval","failure","performance","risk"];
 export const ALERT_TYPES = ["risk","failure","performance"];
 export const SEVERITIES = ["urgent","high","normal"];
-export const STATUSES = ["open","resolved","superseded"];
+// "dismissed" (2026-08-17) is a HUMAN terminal state: cleared from the queue without recording
+// an approve/reject or an acknowledgement. It exists so bulk-clearing 100+ stale items does not
+// pollute the decision log with decisions nobody actually made — the log stays an honest record
+// of what was decided, and dismissals stay visibly separate from it.
+export const STATUSES = ["open","resolved","superseded","dismissed"];
 export const DECISIONS = ["approved","rejected","changes_requested","answered"];
 export const RECORD_KINDS = ["decision","ack","producer_ack","status"];
 const REQUIRED = ["item_id","owner","seat","type","severity","title","link","source","generated_at"];
@@ -44,6 +48,7 @@ function historyRow(rec) {
   let action = rec.kind;
   if (action === "decision") action = rec.decision;
   else if (action === "ack") action = "acknowledged";
+  else if (action === "status") action = rec.status === "dismissed" ? "dismissed" : (rec.status || "status");
   else if (action === "comment") action = rec.author_kind === "agent" ? "replied" : "commented";
   return { ts: rec.ts, by: rec.by || "?", action, note: rec.feedback || rec.text || "" };
 }
@@ -62,6 +67,9 @@ function applyRecord(it, rec) {
   } else if (kind === "status") {
     it.status = rec.status || it.status;
     if (it.status !== "open") it.resolved_at = ts;
+    // A dismissal is attributable: who cleared it, when, and why. Without this the item just
+    // vanishes and nobody can answer "who killed this?".
+    if (it.status === "dismissed") { it.dismissed_at = ts; it.dismissed_by = by; it.dismiss_reason = rec.feedback || ""; }
   }
   (it.history || (it.history = [])).push(historyRow(rec));
   return it;
