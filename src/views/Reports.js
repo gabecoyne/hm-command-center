@@ -1,7 +1,7 @@
 // Reports view — agent-posted MD/HTML reports (replaces email/Slack).
 // Ported from the monolith's renderReports/openReport/markRead/dropNote.
 import { html } from '../html.js';
-import { useState } from 'preact/hooks';
+import { useState, useEffect, useMemo } from 'preact/hooks';
 import { useStore, getState, currentUser } from '../state.js';
 import { aPut, postItem, postDecision } from '../data.js';
 import { esc, cap, mdToHtml, nowCT } from '../lib/format.js';
@@ -14,7 +14,7 @@ const isHtmlReport = r => String(r.format || '').toLowerCase() === 'html' || /^\
 
 const REPORT_PERSON_FALLBACK = { 'athena-finance': 'collin', 'hestia-cs': 'collin', 'demeter-inventory': 'collin', 'daily-finance': 'collin', 'hm-fin-weekly-actuals': 'collin', 'hm-fin-monthly-close': 'collin', 'hm-cbp-statement-check': 'collin', 'hm-gorgias-responder': 'collin', 'hm-cs-approval-grader': 'collin', 'hm-cs-learning-loop': 'collin', 'hm-inventory-monitor': 'collin', 'hm-inbound-tracker': 'collin', 'hm-stuck-shipments': 'collin' };
 
-function reportFor(r) {
+export function reportFor(r) {
   const a = (r.assignees || []).map(x => String(x).toLowerCase()).filter(x => x === 'gabe' || x === 'collin');
   if (a.length) return [...new Set(a)];
   const src = String(r.source || '').toLowerCase();
@@ -109,10 +109,46 @@ function Drawer({ r, onClose, onRead }) {
     </div>`;
 }
 
+/* Filters, mirroring the Feedback queue so the two shelves work the same way: who it's for, which
+   agent wrote it, and free text over the title/summary. `reportFor` already resolves routing (explicit
+   assignees → the agent's reports_to → a source-name fallback), so the person filter reuses it rather
+   than inventing a second, disagreeing notion of whose report this is. */
+const SEL = 'bg-ink border border-edge rounded-lg px-2.5 py-1.5 text-[13px] text-slate-200 focus:border-accent/60 focus:outline-none';
+
 export function Reports() {
   const s = useStore();
   const [open, setOpen] = useState(null);
-  const items = s.reports.items || [];
+  const all = s.reports.items || [];
+
+  /* Same default as Feedback: your shelf, not the whole estate's. The sidebar badge counts the same
+     set, so the number you click and the list you land on agree. */
+  const [rSearch, setRSearch] = useState('');
+  const [fPerson, setFPerson] = useState(s.user);
+  const [fAgent, setFAgent] = useState('all');
+  const [unreadOnly, setUnreadOnly] = useState(false);
+  useEffect(() => { setFPerson(s.user); }, [s.user]);
+
+  // agent options come from the reports actually on the shelf, with counts
+  const agentOpts = useMemo(() => {
+    const m = new Map();
+    for (const r of all) { const n = r.source || 'agent'; m.set(n, (m.get(n) || 0) + 1); }
+    return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [all]);
+
+  const matches = r => {
+    if (fPerson !== 'all' && !reportFor(r).includes(fPerson)) return false;
+    if (fAgent !== 'all' && (r.source || 'agent') !== fAgent) return false;
+    if (unreadOnly && r.read) return false;
+    if (rSearch) {
+      const hay = [r.title, r.summary, r.source, r.seat, r.date].filter(Boolean).join(' ').toLowerCase();
+      if (!hay.includes(rSearch)) return false;
+    }
+    return true;
+  };
+  const items = all.filter(matches);
+  const filtered = fPerson !== s.user || fAgent !== 'all' || unreadOnly || !!rSearch;
+  const resetFilters = () => { setRSearch(''); setFPerson(s.user); setFAgent('all'); setUnreadOnly(false); };
+  const btn = 'px-3 py-1.5 rounded-lg text-[12px] border border-edge text-slate-300 hover:text-white hover:bg-panel2';
 
   async function markRead(r) {
     const cur = getState().reports;
@@ -126,6 +162,23 @@ export function Reports() {
 
   return html`
     <div class="max-w-[1100px]">
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <input class="bg-ink border border-edge rounded-lg px-3 py-1.5 text-[13px] text-slate-200 placeholder:text-slate-500 focus:border-accent/60 focus:outline-none flex-1 min-w-[200px]"
+               placeholder="Search reports — title, summary, agent…" value=${rSearch}
+               onInput=${e => setRSearch(e.target.value.trim().toLowerCase())}/>
+        <select class=${SEL} value=${fPerson} onChange=${e => setFPerson(e.target.value)} title="Who the report is for">
+          <option value="all">Anyone</option><option value="gabe">Gabe</option><option value="collin">Collin</option>
+        </select>
+        <select class=${SEL} value=${fAgent} onChange=${e => setFAgent(e.target.value)} title="Which agent wrote it">
+          <option value="all">All agents</option>
+          ${agentOpts.map(([n, c]) => html`<option key=${n} value=${n}>${n} (${c})</option>`)}
+        </select>
+        <label class="flex items-center gap-1.5 text-[12px] text-slate-300 px-2 py-1.5 rounded-lg border border-edge cursor-pointer hover:text-white" title="Only reports you haven't opened">
+          <input type="checkbox" class="accent-accent h-3.5 w-3.5" checked=${unreadOnly} onChange=${e => setUnreadOnly(e.target.checked)}/> Unread
+        </label>
+        <span class="text-[11px] font-mono text-slate-400 whitespace-nowrap">${items.length}${items.length !== all.length ? ' of ' + all.length : ''}</span>
+        ${filtered ? html`<button class=${btn} onClick=${resetFilters}>Clear filters</button>` : null}
+      </div>
       ${items.length ? html`
         <div class="rounded-xl border border-edge bg-panel glow overflow-hidden">
           <div class="${RGC} text-[10px] uppercase tracking-widest text-slate-500 border-b border-edge/60">
@@ -135,7 +188,9 @@ export function Reports() {
             ${items.map(r => html`<${Row} key=${r.id} r=${r} onOpen=${setOpen}/>`)}
           </div>
         </div>` : html`
-        <div class="rounded-xl border border-edge bg-panel p-10 text-center text-slate-400">No reports yet. Agents post MD/HTML reports here (replacing email/Slack).</div>`}
+        <div class="rounded-xl border border-edge bg-panel p-10 text-center text-slate-400">${all.length
+          ? html`Nothing matches these filters. <button class="text-accent hover:underline" onClick=${resetFilters}>Clear them</button> to see all ${all.length}.`
+          : html`No reports yet. Agents post MD/HTML reports here (replacing email/Slack).`}</div>`}
       <${Drawer} r=${open} onClose=${() => setOpen(null)} onRead=${markRead}/>
     </div>`;
 }

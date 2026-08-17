@@ -8,7 +8,7 @@ import { liveItems } from './lib/attention.js';
 import { Sidebar } from './components/Sidebar.js';
 import { Header } from './components/Header.js';
 import { Toasts } from './components/Toasts.js';
-import { Reports } from './views/Reports.js';
+import { Reports, reportFor } from './views/Reports.js';
 import { Dashboard } from './views/Dashboard.js';
 import { Feedback } from './views/Feedback.js';
 import { Tasks } from './views/Tasks.js';
@@ -35,7 +35,9 @@ function App() {
   const mine = liveItems(s.attn.items).filter(i => String(i.owner || '').toLowerCase() === s.user);
   const badges = {
     q: mine.length,
-    r: (s.reports.items || []).filter(r => !r.read).length,
+    // same scoping rule as the Feedback badge: what's unread FOR YOU, resolved through the same
+    // routing the Reports list uses, so the badge and the list can't disagree.
+    r: (s.reports.items || []).filter(r => !r.read && reportFor(r).includes(s.user)).length,
     a: (s.roster.agents || []).length,
     s: (s.sched && s.sched.tasks ? s.sched.tasks.length : 0),
     // CRO badge counts tests at significance (a decision is waiting) and falls
