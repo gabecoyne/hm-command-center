@@ -25,13 +25,16 @@ const VIEWS = { dashboard: Dashboard, feedback: Feedback, attention: Feedback, t
 function App() {
   const s = useStore();
   const [view, setView] = useState('dashboard');
-  const [who, setWho] = useState('all');
   const [nav, setNav] = useState(false);            // mobile drawer open
   const View = VIEWS[view] || Dashboard;
   const go = (v) => { setView(v); setNav(false); };  // pick a view, close the drawer on mobile
 
+  /* The Feedback badge answers "how much is waiting on ME", so it follows the Reviewing-as
+     selection rather than counting the whole estate's queue. A number that never changes when
+     you switch reviewer isn't telling either person anything actionable. */
+  const mine = liveItems(s.attn.items).filter(i => String(i.owner || '').toLowerCase() === s.user);
   const badges = {
-    q: liveItems(s.attn.items).length,
+    q: mine.length,
     r: (s.reports.items || []).filter(r => !r.read).length,
     a: (s.roster.agents || []).length,
     s: (s.sched && s.sched.tasks ? s.sched.tasks.length : 0),
@@ -43,9 +46,9 @@ function App() {
   return html`
     <${Sidebar} view=${view} setView=${go} user=${s.user} setUser=${setUser} connected=${s.connected} loading=${s.loading} badges=${badges} open=${nav} onClose=${() => setNav(false)}/>
     <div class="md:ml-[220px]">
-      <${Header} title=${TITLES[view]} showWho=${view === 'feedback' || view === 'attention'} who=${who} setWho=${setWho} onMenu=${() => setNav(true)}/>
+      <${Header} title=${TITLES[view]} onMenu=${() => setNav(true)}/>
       <main class="p-3 md:p-6">
-        <div class="fade" key=${view}><${View} who=${who}/></div>
+        <div class="fade" key=${view}><${View}/></div>
       </main>
     </div>
     <${Toasts}/>`;

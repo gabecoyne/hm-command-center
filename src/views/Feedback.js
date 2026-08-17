@@ -2,10 +2,10 @@
 // Agents file what they need from us (approvals to decide, alerts to acknowledge); we respond here.
 // (Formerly the "Attention" view; renamed 2026-08-10. Underlying item schema unchanged.)
 import { html } from '../html.js';
-import { useState, useEffect, useMemo } from 'preact/hooks';
+import { useState, useEffect, useMemo, useRef } from 'preact/hooks';
 import { useStore, getState, currentUser } from '../state.js';
 import { postDecision, postBulkDecision } from '../data.js';
-import { esc, mdToHtml, nowCT, schWhen } from '../lib/format.js';
+import { esc, cap, mdToHtml, nowCT, schWhen } from '../lib/format.js';
 import { userAv, EMB, TONE } from '../lib/avatars.js';
 import { isLive, isAlert, isDismissed } from '../lib/attention.js';
 import { banner } from '../components/Toasts.js';
@@ -36,7 +36,9 @@ const actorMeta = it => ACTOR[actorOf(it)] || UNSTATED;
 
 const TYPE_RANK = { approval: 0, risk: 1, failure: 2, performance: 3 }, SEV_RANK = { urgent: 0, high: 1, normal: 2 };
 const qSort = (a, b) => ((TYPE_RANK[a.type] ?? 9) - (TYPE_RANK[b.type] ?? 9)) || ((SEV_RANK[a.severity] ?? 9) - (SEV_RANK[b.severity] ?? 9)) || String(a.generated_at || '').localeCompare(String(b.generated_at || ''));
-const QGRID = 'grid grid-cols-[20px_12px_2fr_0.9fr_3.4fr_1.1fr_58px_auto] gap-3 items-center';
+/* Full-width layout. The Item column is the only flexible one — everything else is fixed, so the
+   extra width all goes to the summary rather than being shared out into whitespace. */
+const QGRID = 'grid grid-cols-[20px_12px_200px_104px_minmax(0,1fr)_128px_52px_178px] gap-3 items-center';
 
 /* Age, not date, is what you act on: "these are all a week old, clear them" is the actual workflow.
    Compact unit ("6d" / "3w") with the real timestamp on hover, and it colours as it rots so a stale
@@ -111,16 +113,15 @@ function logDecidedAt(it) { const ap = it.approval || {}; return it.dismissed_at
 
 /* ---------- raw-HTML inner fragments for the rows (rendered via dangerouslySetInnerHTML) ---------- */
 function cardInner(it) { const type = it.type || 'approval'; const tl = TL[type] || type; const tc = TC[type] || 'bg-slate-700 text-slate-300'; const ap = it.approval || {};
-  const title = it.title || ''; let preview = isAlert(it) ? '' : (ap.question || ap.proposal || ap.what_i_found || ''); if (preview === title) preview = ap.proposal || ap.what_i_found || '';
+  const title = it.title || ''; let preview = isAlert(it) ? (it.detail || '') : (ap.question || ap.proposal || ap.what_i_found || ''); if (preview === title) preview = ap.proposal || ap.what_i_found || '';
   const m = seatForSource(it.source); const am = actorMeta(it);
   return `<span class="h-2 w-2 rounded-full shrink-0 ${PRI[it.severity] || 'bg-slate-600'}" title="${esc(it.severity || '')}"></span>
     ${agentCell(m)}
     <span class="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded ${tc} justify-self-start whitespace-nowrap">${esc(tl)}</span>
-    <div class="min-w-0"><div class="text-[13px] text-white truncate">${esc(title)}</div>
-      <div class="flex items-center gap-1.5 min-w-0">${isAlert(it) ? '' : `<span class="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 ${am.cls}" title="${esc(am.line(m.name))}">${esc(am.pill)}</span>`}${preview ? `<span class="text-[11px] text-slate-400 truncate">${esc(preview)}</span>` : ''}</div></div>
+    <div class="min-w-0 py-0.5"><div class="text-[13px] text-white truncate">${esc(title)}</div>
+      <div class="flex items-start gap-1.5 min-w-0 mt-0.5">${isAlert(it) ? '' : `<span class="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 mt-px ${am.cls}" title="${esc(am.line(m.name))}">${esc(am.pill)}</span>`}${preview ? `<span class="text-[11px] text-slate-400 leading-snug" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(preview)}</span>` : ''}</div></div>
     ${assigneeCell(it.owner)}
-    <span class="text-[11px] font-mono ${ageTone(ageDays(it))} justify-self-end whitespace-nowrap" title="filed ${esc(String(it.generated_at || '').replace('T', ' ').slice(0, 16))}">${esc(ageLabel(ageDays(it)))}</span>
-    <span class="text-[11px] text-emerald-400/80 shrink-0 justify-self-end whitespace-nowrap">${isAlert(it) ? 'Acknowledge ›' : 'Review ›'}</span>`; }
+    <span class="text-[11px] font-mono ${ageTone(ageDays(it))} justify-self-end whitespace-nowrap" title="filed ${esc(String(it.generated_at || '').replace('T', ' ').slice(0, 16))}">${esc(ageLabel(ageDays(it)))}</span>`; }
 function logRowInner(it) { const m = seatForSource(it.source); const type = it.type || 'approval'; const tl = TL[type] || type; const tc = TC[type] || 'bg-slate-700 text-slate-300'; const ap = it.approval || {};
   const st = decisionOf(it); const dl = DEC_LABELS[st] || st; const dt = DEC_TONE[st] || 'bg-slate-600/30 text-slate-300';
   const title = it.title || ''; const sub = ap.feedback || ''; const by = ap.decided_by || it.ack_by || ''; const when = logDecidedAt(it);
@@ -149,19 +150,56 @@ function drawerBodyTop(it) { const type = it.type || 'approval'; const m = seatF
     ${anyBody ? '' : `<p class="text-sm text-slate-400 mt-3">${isAlert(it) ? 'Heads-up only — the title is the whole item. Acknowledge to clear it.' : 'No extra detail was attached to this item.'}</p>`}`; }
 
 /* ---------- components ---------- */
-function QueueRow({ it, onOpen, selected, onToggle }) {
+/* Inline actions — clear the obvious ones without opening anything.
+   The two verbs are deliberately NOT symmetric:
+     • Acknowledge (alerts) is one tap. An alert is heads-up only; the whole lifecycle is "seen it",
+       and the title is contractually the entire item, so there is nothing behind the drawer to read.
+     • Approve (decisions) is tap-then-confirm. It authorises an agent to go and change something —
+       budgets, live ads, shipping. One stray click in a dense list should not do that, and the
+       second tap costs a moment against a mis-click that costs money.
+   Reject and Request-changes never appear inline: both require a written note (the producer reads
+   it back), so they belong in the drawer where there is somewhere to write it.
+   An item asking a QUESTION (`approval.options`) gets no inline approve either — there is no single
+   obvious answer to one-click, so it says Choose ›. */
+function RowActions({ it, onAck, onApprove }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => { if (!armed) return; const t = setTimeout(() => setArmed(false), 4000); return () => clearTimeout(t); }, [armed]);
+  const stop = e => { e.stopPropagation(); };
+  const base = 'px-2 py-1 rounded-md text-[11px] font-medium whitespace-nowrap transition';
+  if (isAlert(it)) {
+    return html`<div class="flex items-center gap-1.5 justify-self-end" onClick=${stop}>
+      <button class="${base} bg-accent/90 text-ink hover:bg-accent" title="Acknowledge — clears it, nothing to decide"
+              onClick=${() => onAck(it)}>Acknowledge</button>
+      <span class="text-[11px] text-slate-500">›</span></div>`;
+  }
+  if ((it.approval || {}).options && it.approval.options.length) {
+    return html`<div class="flex items-center gap-1.5 justify-self-end"><span class="text-[11px] text-emerald-400/80">Choose ›</span></div>`;
+  }
+  return html`<div class="flex items-center gap-1.5 justify-self-end" onClick=${stop}>
+    ${armed
+      ? html`<button class="${base} bg-emerald-500 text-ink hover:brightness-110" title="Confirm approval"
+                     onClick=${() => { setArmed(false); onApprove(it); }}>Approve?</button>
+             <button class="${base} text-slate-400 hover:text-white" onClick=${() => setArmed(false)}>✕</button>`
+      : html`<button class="${base} border border-edge text-slate-300 hover:border-emerald-500/60 hover:text-emerald-300"
+                     title="Approve without opening — one more tap to confirm" onClick=${() => setArmed(true)}>Approve</button>
+             <span class="text-[11px] text-emerald-400/80">Review ›</span>`}
+  </div>`;
+}
+
+function QueueRow({ it, onOpen, selected, onToggle, onAck, onApprove }) {
   /* The checkbox is a real Preact node (it needs an onChange), while the rest of the row stays a
      single innerHTML fragment. `display:contents` on the wrapper lets those raw cells keep
      participating in this row's grid instead of collapsing into one column. */
-  return html`<div class="qrow ${QGRID} px-4 py-3 hover:bg-panel2/40 cursor-pointer fade ${selected ? 'bg-accent/5' : ''}" onClick=${() => onOpen(it)}>
+  return html`<div class="qrow ${QGRID} px-4 py-3 hover:bg-panel2/40 cursor-pointer fade ${selected ? 'bg-accent/5' : ''}" onClick=${() => onOpen(it.item_id)}>
     <input type="checkbox" class="accent-accent h-3.5 w-3.5 cursor-pointer" checked=${selected}
            aria-label=${'Select ' + (it.title || it.item_id)}
            onClick=${e => e.stopPropagation()} onChange=${() => onToggle(it.item_id)}/>
     <span style="display:contents" dangerouslySetInnerHTML=${{ __html: cardInner(it) }}></span>
+    <${RowActions} it=${it} onAck=${onAck} onApprove=${onApprove}/>
   </div>`;
 }
 function LogRow({ it, onOpen }) {
-  return html`<div class="lrow ${LGRID} px-4 py-3 hover:bg-panel2/40 cursor-pointer fade" onClick=${() => onOpen(it)} dangerouslySetInnerHTML=${{ __html: logRowInner(it) }}></div>`;
+  return html`<div class="lrow ${LGRID} px-4 py-3 hover:bg-panel2/40 cursor-pointer fade" onClick=${() => onOpen(it.item_id)} dangerouslySetInnerHTML=${{ __html: logRowInner(it) }}></div>`;
 }
 
 /* Decision controls — declarative replacement for controlsHTML/wireControls. */
@@ -234,13 +272,39 @@ function DecisionBlock({ it, onAck, onSave, onDismiss }) {
   </div>`;
 }
 
-function Drawer({ it, onClose, onAck, onSave, onDismiss }) {
+/* Working a queue means next-next-next, not open-decide-close-hunt-open. The drawer therefore
+   knows its position in the CURRENT filtered list, moves itself on after a decision, and can be
+   stepped through with the arrow keys for items you want to skip rather than decide. */
+function Drawer({ it, pos, total, onClose, onAck, onSave, onDismiss, onPrev, onNext }) {
+  const body = useRef(null);
+  // a new item must start at the top; the pane is reused across items so scroll would persist
+  useEffect(() => { if (body.current) body.current.scrollTop = 0; }, [it && it.item_id]);
+  useEffect(() => {
+    if (!it) return;
+    const k = e => {
+      if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+      if (e.key === 'Escape') { onClose(); }
+      else if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); onNext && onNext(); }
+      else if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); onPrev && onPrev(); }
+    };
+    addEventListener('keydown', k);
+    return () => removeEventListener('keydown', k);
+  }, [it && it.item_id, onPrev, onNext, onClose]);
   if (!it) return null;
+  const nav = 'h-6 w-6 grid place-items-center rounded-md text-slate-400 hover:text-white hover:bg-white/10 disabled:opacity-25 disabled:pointer-events-none';
   return html`
     <div class="fixed inset-0 z-30">
       <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick=${onClose}></div>
-      <aside class="absolute right-0 top-0 h-full w-full sm:max-w-[580px] bg-panel border-l border-edge overflow-y-auto slidein">
-        <div class="sticky top-0 flex items-center justify-between px-5 h-14 border-b border-edge bg-panel/95 backdrop-blur z-10"><span class="text-white font-semibold">${it.title || 'Item'}</span><button class="text-slate-400 hover:text-white text-lg leading-none" onClick=${onClose}>✕</button></div>
+      <aside ref=${body} class="absolute right-0 top-0 h-full w-full sm:max-w-[580px] bg-panel border-l border-edge overflow-y-auto slidein">
+        <div class="sticky top-0 flex items-center gap-3 px-5 h-14 border-b border-edge bg-panel/95 backdrop-blur z-10">
+          <span class="text-white font-semibold truncate flex-1">${it.title || 'Item'}</span>
+          ${pos > 0 ? html`<div class="flex items-center gap-1 shrink-0">
+            <button class=${nav} title="Previous (↑)" disabled=${pos <= 1} onClick=${onPrev}>↑</button>
+            <span class="text-[11px] font-mono text-slate-400 tabular-nums">${pos}/${total}</span>
+            <button class=${nav} title="Next (↓)" disabled=${pos >= total} onClick=${onNext}>↓</button>
+          </div>` : null}
+          <button class="text-slate-400 hover:text-white text-lg leading-none shrink-0" title="Close (Esc)" onClick=${onClose}>✕</button>
+        </div>
         <div class="p-5">
           <div dangerouslySetInnerHTML=${{ __html: drawerBodyTop(it) }}></div>
           <${DecisionBlock} it=${it} onAck=${onAck} onSave=${onSave} onDismiss=${onDismiss}/>
@@ -285,10 +349,14 @@ const sortFor = k => k === 'oldest' ? byAge(1) : k === 'newest' ? byAge(-1) : qS
 
 const SEL = 'bg-ink border border-edge rounded-lg px-2.5 py-1.5 text-[13px] text-slate-200 focus:border-accent/60 focus:outline-none';
 
-export function Feedback(props) {
+export function Feedback() {
   const s = useStore();
-  const who = props.who || 'all';
-  const [open, setOpen] = useState(null);
+  /* Default the queue to whoever you're reviewing as. Opening Feedback should show YOUR work, not
+     the whole estate's — and the sidebar badge counts the same set, so the number you clicked and
+     the list you land on agree. The person dropdown still lets you look at the other queue without
+     changing who your decisions are recorded as (that stays Reviewing-as). */
+  const who = s.user;
+  const [openId, setOpenId] = useState(null);
   const [logSearch, setLogSearch] = useState('');
   const [logFilter, setLogFilter] = useState('all');
   const [logPage, setLogPage] = useState(1);
@@ -296,14 +364,15 @@ export function Feedback(props) {
   /* Queue filters. Person seeds from the header's "reviewing as" control and stays in sync with
      it, so the two never silently disagree about who you're looking at. */
   const [qSearch, setQSearch] = useState('');
-  const [fPerson, setFPerson] = useState(who);
+  const [fPerson, setFPerson] = useState(s.user);
   const [fAgent, setFAgent] = useState('all');
   const [fType, setFType] = useState('all');
   const [fAge, setFAge] = useState('all');
   const [qSortKey, setQSortKey] = useState('priority');
   const [sel, setSel] = useState(() => new Set());
   const [busy, setBusy] = useState(false);
-  useEffect(() => { setFPerson(who); }, [who]);
+  // switching Reviewing-as re-points the queue at that person's work
+  useEffect(() => { setFPerson(s.user); setLogPage(1); }, [s.user]);
 
   /* Approvals: the human writes the DECISION into approval.*; top-level status stays "open" until the
      producing agent reads it back (Attention_Item_Contract.md §6) and sets approval.ack_at. */
@@ -313,8 +382,8 @@ export function Feedback(props) {
     try {
       await postDecision({ item_id: before.item_id, kind: 'decision', by: currentUser(),
                            decision: patch.decision, feedback: patch.feedback || '' });
-      setOpen(null);
-      banner('ok', `Saved — <b>${esc(before.title || it.item_id)}</b>. ${esc(before.source || 'The agent')} picks it up next run.`);
+      const more = advanceFrom(before.item_id);
+      banner('ok', `Saved — <b>${esc(before.title || openId)}</b>. ${esc(before.source || 'The agent')} picks it up next run.${more ? '' : ' That was the last one. ✓'}`);
     } catch (e) { banner('err', 'Write failed (server running?). ' + esc(e.message)); }
   }
   /* Alerts: one Acknowledge is the entire lifecycle — ack_at/ack_by at the top level, status -> resolved. */
@@ -323,10 +392,23 @@ export function Feedback(props) {
     if (!isAlert(before)) return banner('err', "That's an approval — it needs a decision, not an acknowledgement.");
     try {
       await postDecision({ item_id: before.item_id, kind: 'ack', by: currentUser() });
-      setOpen(null);
-      banner('ok', `Acknowledged — <b>${esc(before.title || it.item_id)}</b>.`);
+      const more = advanceFrom(before.item_id);
+      banner('ok', `Acknowledged — <b>${esc(before.title || openId)}</b>.${more ? '' : ' That was the last one. ✓'}`);
     } catch (e) { banner('err', 'Write failed (server running?). ' + esc(e.message)); }
   }
+  /* Inline approve from the row. Same write as the drawer's Approve, with no note — which is
+     exactly right: a note is only mandatory when rejecting or requesting changes. */
+  async function approveInline(it) {
+    const before = (getState().attn.items || []).find(i => i.item_id === it.item_id) || it;
+    if (isAlert(before)) return ack(before);
+    try {
+      await postDecision({ item_id: before.item_id, kind: 'decision', by: currentUser(),
+                           decision: 'approved', feedback: '' });
+      const m = seatForSource(before.source).name;
+      banner('ok', `Approved — <b>${esc(before.title || before.item_id)}</b>. ${actorOf(before) === 'human' ? 'Remember this one is yours to carry out.' : esc(m) + ' proceeds on its next run.'}`);
+    } catch (e) { banner('err', 'Write failed. ' + esc(e.message)); }
+  }
+
   /* Dismiss: clear WITHOUT pretending a decision was made. Works on approvals and alerts alike,
      one item or many, and is recorded as its own outcome so the decision log stays truthful. */
   async function dismiss(ids, reason) {
@@ -336,7 +418,9 @@ export function Feedback(props) {
     try {
       await postBulkDecision({ item_ids: list, kind: 'status', status: 'dismissed',
                                by: currentUser(), feedback: reason || '' });
-      setSel(new Set()); setOpen(null);
+      setSel(new Set());
+      // one from the drawer keeps the run going; a bulk clear ends it
+      if (list.length === 1 && openId === list[0]) advanceFrom(list[0]); else setOpenId(null);
       banner('ok', `Dismissed ${list.length} item${list.length === 1 ? '' : 's'} — cleared without a decision. Still in the log.`);
     } catch (e) { banner('err', 'Dismiss failed. ' + esc(e.message)); }
     finally { setBusy(false); }
@@ -353,8 +437,11 @@ export function Feedback(props) {
   }
 
   const live = (s.attn.items || []).filter(isLive);
-  const staleCount = live.filter(i => (ageDays(i) ?? 0) >= 7).length;
-  const youActCount = live.filter(i => !isAlert(i) && actorOf(i) === 'human').length;
+  /* Scoped to the SAME person the list is showing. Counting across everyone made the chip promise
+     a number the click could not deliver ("3 over a week old" → 2 rows). */
+  const forPerson = fPerson === 'all' ? live : live.filter(i => String(i.owner || '').toLowerCase() === fPerson);
+  const staleCount = forPerson.filter(i => (ageDays(i) ?? 0) >= 7).length;
+  const youActCount = forPerson.filter(i => !isAlert(i) && actorOf(i) === 'human').length;
   /* Agent options come from the items actually in the queue, not a hardcoded roster — a filter
      listing agents with nothing to show is noise, and one missing an agent hides work. */
   const agentOpts = useMemo(() => {
@@ -378,7 +465,21 @@ export function Feedback(props) {
     return true;
   };
   const items = live.filter(qMatch).sort(sortFor(qSortKey));
-  const filtered = items.length !== live.length || qSortKey !== 'priority';
+  /* The drawer holds an ID, never a snapshot: an item object captured at open time goes stale the
+     moment a decision folds, and advancing would then render the previous item's payload. */
+  const openItem = openId ? (s.attn.items || []).find(i => i.item_id === openId) || null : null;
+  const openIdx = openId ? items.findIndex(i => i.item_id === openId) : -1;
+  /* Move to the item that will occupy this slot once the current one is decided. `items` is the
+     list as rendered, so the successor is simply the next index — and because deciding removes the
+     current item, that successor slides into the same position. Past the end, we're done. */
+  const advanceFrom = id => {
+    const i = items.findIndex(x => x.item_id === id);
+    const next = i >= 0 ? items[i + 1] : null;
+    setOpenId(next ? next.item_id : null);
+    return !!next;
+  };
+  const step = d => { if (openIdx < 0) return; const n = items[openIdx + d]; if (n) setOpenId(n.item_id); };
+  const filtered = fPerson !== s.user || fAgent !== 'all' || fType !== 'all' || fAge !== 'all' || !!qSearch || qSortKey !== 'priority';
   const visibleIds = items.map(i => i.item_id);
   const selIds = visibleIds.filter(id => sel.has(id));           // never act on a hidden selection
   const selItems = items.filter(i => sel.has(i.item_id));
@@ -391,12 +492,13 @@ export function Feedback(props) {
     if (allSel) visibleIds.forEach(id => n.delete(id)); else visibleIds.forEach(id => n.add(id));
     return n;
   });
-  const resetFilters = () => { setQSearch(''); setFPerson('all'); setFAgent('all'); setFType('all'); setFAge('all'); setQSortKey('priority'); };
+    // back to the DEFAULT state (your own queue), not to no-filter-at-all
+  const resetFilters = () => { setQSearch(''); setFPerson(s.user); setFAgent('all'); setFType('all'); setFAge('all'); setQSortKey('priority'); };
 
   const allDecided = (s.attn.items || []).filter(i => !!decisionOf(i)).slice().sort((a, b) => String(logDecidedAt(b)).localeCompare(String(logDecidedAt(a))));
   const matches = it => { const ap = it.approval || {}, d = decisionOf(it);
     if (logFilter !== 'all' && d !== logFilter) return false;
-    if (who !== 'all') { const w = String(ap.decided_by || it.ack_by || it.dismissed_by || it.owner || '').toLowerCase(); if (w !== who) return false; }
+    if (fPerson !== 'all') { const w = String(ap.decided_by || it.ack_by || it.dismissed_by || it.owner || '').toLowerCase(); if (w !== fPerson) return false; }
     if (logSearch) { const hay = [it.title, ap.question, ap.proposal, ap.what_i_found, ap.feedback, it.source, it.seat, ap.decided_by, it.ack_by, it.dismissed_by, it.owner, DEC_LABELS[d] || d].filter(Boolean).join(' ').toLowerCase(); if (!hay.includes(logSearch)) return false; }
     return true; };
   const rows = allDecided.filter(matches);
@@ -409,7 +511,7 @@ export function Feedback(props) {
 
   return html`
     <div>
-      <div class="rounded-xl border border-edge bg-panel/60 p-4 mb-4 max-w-[1000px]">
+      <div class="rounded-xl border border-edge bg-panel/60 p-4 mb-4">
         <p class="text-sm text-slate-300">The <b class="text-white">human ⇄ AI feedback loop</b>. The agents file what they need from you here — <b class="text-white">approvals</b> that need a decision and <b class="text-white">alerts</b> (risk / failure / performance) that are heads-up only. You answer in the same place: decide or comment on an approval, acknowledge an alert, or <b class="text-white">dismiss</b> anything you're not going to act on — dismissing clears it without recording a decision you didn't make.</p>
       </div>
 
@@ -455,21 +557,21 @@ export function Feedback(props) {
           <span class="text-[11px] text-slate-400 ml-auto">Dismissing records who cleared it and why — it never counts as an approval.</span>
         </div>` : null}
 
-      <div id="queue" class="grid gap-3 max-w-[1000px]">
+      <div id="queue" class="grid gap-3">
         ${items.length ? html`
           <div class="rounded-xl border border-edge bg-panel glow overflow-hidden">
             <div class="${QGRID} px-4 py-2 text-[10px] uppercase tracking-widest text-slate-400 border-b border-edge/60">
               <input type="checkbox" class="accent-accent h-3.5 w-3.5 cursor-pointer" checked=${allSel} aria-label="Select all shown" onChange=${toggleAll}/>
-              <span></span><span>Agent</span><span>Type</span><span>Item</span><span>For</span><span class="justify-self-end">Age</span><span></span>
+              <span></span><span>Agent</span><span>Type</span><span>Item</span><span>For</span><span class="justify-self-end">Age</span><span class="justify-self-end">Action</span>
             </div>
             <div class="divide-y divide-edge/60">
-              ${items.map(it => html`<${QueueRow} key=${it.item_id} it=${it} onOpen=${setOpen} selected=${sel.has(it.item_id)} onToggle=${toggle}/>`)}
+              ${items.map(it => html`<${QueueRow} key=${it.item_id} it=${it} onOpen=${setOpenId} selected=${sel.has(it.item_id)} onToggle=${toggle} onAck=${ack} onApprove=${approveInline}/>`)}
             </div>
           </div>`
-        : html`<div class="rounded-xl border border-edge bg-panel p-10 text-center text-slate-400">${live.length ? html`Nothing matches these filters. <button class="text-accent hover:underline" onClick=${resetFilters}>Clear them</button> to see all ${live.length}.` : html`Nothing needs your response${who !== 'all' ? ' for ' + who : ''}. ✓`}</div>`}
+        : html`<div class="rounded-xl border border-edge bg-panel p-10 text-center text-slate-400">${live.length ? html`Nothing matches these filters. <button class="text-accent hover:underline" onClick=${resetFilters}>Clear them</button> to see all ${live.length}.` : html`Nothing needs your response${fPerson !== 'all' ? ' for ' + cap(fPerson) : ''}. ✓`}</div>`}
       </div>
 
-      <div id="qlog" class="mt-10 max-w-[1000px]">
+      <div id="qlog" class="mt-10">
         <div class="flex items-center gap-2.5 mb-3 flex-wrap">
           <h2 class="text-white font-semibold text-[15px]">Decision log</h2>
           <span class="text-[11px] font-mono text-slate-400">${countText}</span>
@@ -491,7 +593,7 @@ export function Feedback(props) {
             <div class="rounded-xl border border-edge bg-panel overflow-hidden">
               <div class="${LGRID} px-4 py-2 text-[10px] uppercase tracking-widest text-slate-400 border-b border-edge/60"><span>Decision</span><span>Agent</span><span>Type</span><span>Request</span><span>By</span><span class="justify-self-end">When</span></div>
               <div class="divide-y divide-edge/60">
-                ${pageRows.map(it => html`<${LogRow} key=${it.item_id} it=${it} onOpen=${setOpen}/>`)}
+                ${pageRows.map(it => html`<${LogRow} key=${it.item_id} it=${it} onOpen=${setOpenId}/>`)}
               </div>
             </div>` : html`<div class="rounded-xl border border-edge bg-panel p-8 text-center text-slate-400 text-sm">${allDecided.length ? `No decisions match ${logSearch ? '“' + logSearch + '”' : 'this filter'}.` : 'Nothing has been decided or acknowledged yet.'}</div>`}
         </div>
@@ -506,6 +608,8 @@ export function Feedback(props) {
         </div>
       </div>
 
-      <${Drawer} it=${open} onClose=${() => setOpen(null)} onAck=${ack} onSave=${save} onDismiss=${dismiss}/>
+      <${Drawer} it=${openItem} pos=${openIdx + 1} total=${items.length}
+                 onClose=${() => setOpenId(null)} onAck=${ack} onSave=${save} onDismiss=${dismiss}
+                 onPrev=${() => step(-1)} onNext=${() => step(1)}/>
     </div>`;
 }
