@@ -38,7 +38,7 @@ const TYPE_RANK = { approval: 0, risk: 1, failure: 2, performance: 3 }, SEV_RANK
 const qSort = (a, b) => ((TYPE_RANK[a.type] ?? 9) - (TYPE_RANK[b.type] ?? 9)) || ((SEV_RANK[a.severity] ?? 9) - (SEV_RANK[b.severity] ?? 9)) || String(a.generated_at || '').localeCompare(String(b.generated_at || ''));
 /* Full-width layout. The Item column is the only flexible one — everything else is fixed, so the
    extra width all goes to the summary rather than being shared out into whitespace. */
-const QGRID = 'grid grid-cols-[20px_12px_200px_104px_minmax(0,1fr)_128px_52px_178px] gap-3 items-center';
+const QGRID = 'grid grid-cols-[20px_12px_200px_104px_minmax(0,1fr)_128px_52px_190px] gap-3 items-center';
 
 /* Age, not date, is what you act on: "these are all a week old, clear them" is the actual workflow.
    Compact unit ("6d" / "3w") with the real timestamp on hover, and it colours as it rots so a stale
@@ -161,32 +161,39 @@ function drawerBodyTop(it) { const type = it.type || 'approval'; const m = seatF
    it back), so they belong in the drawer where there is somewhere to write it.
    An item asking a QUESTION (`approval.options`) gets no inline approve either — there is no single
    obvious answer to one-click, so it says Choose ›. */
-function RowActions({ it, onAck, onApprove }) {
+function RowActions({ it, onAck, onApprove, onDismiss }) {
   const [armed, setArmed] = useState(false);
   useEffect(() => { if (!armed) return; const t = setTimeout(() => setArmed(false), 4000); return () => clearTimeout(t); }, [armed]);
   const stop = e => { e.stopPropagation(); };
   const base = 'px-2 py-1 rounded-md text-[11px] font-medium whitespace-nowrap transition';
+  /* Every row gets the same two moves: deal with it, or get rid of it. The ✕ is one tap and needs
+     no confirm — dismissing changes nothing in the world, it only clears the row, and it is
+     recorded with who and when so it is auditable and reversible by re-filing. It is hidden while
+     Approve is armed so the two ✕-shaped affordances (cancel vs dismiss) never sit side by side. */
+  const dismissX = html`<button class="h-6 w-6 grid place-items-center rounded-md text-slate-500 hover:text-slate-200 hover:bg-white/10 text-[13px] leading-none"
+      title="Dismiss — clear it without deciding. Logged, never counted as an approval."
+      aria-label="Dismiss" onClick=${() => onDismiss([it.item_id], '')}>✕</button>`;
+
   if (isAlert(it)) {
-    return html`<div class="flex items-center gap-1.5 justify-self-end" onClick=${stop}>
+    return html`<div class="flex items-center gap-1 justify-self-end" onClick=${stop}>
       <button class="${base} bg-accent/90 text-ink hover:bg-accent" title="Acknowledge — clears it, nothing to decide"
-              onClick=${() => onAck(it)}>Acknowledge</button>
-      <span class="text-[11px] text-slate-500">›</span></div>`;
+              onClick=${() => onAck(it)}>Acknowledge</button>${dismissX}</div>`;
   }
   if ((it.approval || {}).options && it.approval.options.length) {
-    return html`<div class="flex items-center gap-1.5 justify-self-end"><span class="text-[11px] text-emerald-400/80">Choose ›</span></div>`;
+    return html`<div class="flex items-center gap-1 justify-self-end" onClick=${stop}>
+      <span class="text-[11px] text-emerald-400/80 px-1" title="This one asks a question — open it to pick an answer">Choose ›</span>${dismissX}</div>`;
   }
-  return html`<div class="flex items-center gap-1.5 justify-self-end" onClick=${stop}>
+  return html`<div class="flex items-center gap-1 justify-self-end" onClick=${stop}>
     ${armed
       ? html`<button class="${base} bg-emerald-500 text-ink hover:brightness-110" title="Confirm approval"
                      onClick=${() => { setArmed(false); onApprove(it); }}>Approve?</button>
-             <button class="${base} text-slate-400 hover:text-white" onClick=${() => setArmed(false)}>✕</button>`
+             <button class="${base} text-slate-400 hover:text-white" onClick=${() => setArmed(false)}>Cancel</button>`
       : html`<button class="${base} border border-edge text-slate-300 hover:border-emerald-500/60 hover:text-emerald-300"
-                     title="Approve without opening — one more tap to confirm" onClick=${() => setArmed(true)}>Approve</button>
-             <span class="text-[11px] text-emerald-400/80">Review ›</span>`}
+                     title="Approve without opening — one more tap to confirm" onClick=${() => setArmed(true)}>Approve</button>${dismissX}`}
   </div>`;
 }
 
-function QueueRow({ it, onOpen, selected, onToggle, onAck, onApprove }) {
+function QueueRow({ it, onOpen, selected, onToggle, onAck, onApprove, onDismiss }) {
   /* The checkbox is a real Preact node (it needs an onChange), while the rest of the row stays a
      single innerHTML fragment. `display:contents` on the wrapper lets those raw cells keep
      participating in this row's grid instead of collapsing into one column. */
@@ -195,7 +202,7 @@ function QueueRow({ it, onOpen, selected, onToggle, onAck, onApprove }) {
            aria-label=${'Select ' + (it.title || it.item_id)}
            onClick=${e => e.stopPropagation()} onChange=${() => onToggle(it.item_id)}/>
     <span style="display:contents" dangerouslySetInnerHTML=${{ __html: cardInner(it) }}></span>
-    <${RowActions} it=${it} onAck=${onAck} onApprove=${onApprove}/>
+    <${RowActions} it=${it} onAck=${onAck} onApprove=${onApprove} onDismiss=${onDismiss}/>
   </div>`;
 }
 function LogRow({ it, onOpen }) {
@@ -251,9 +258,10 @@ function DecisionBlock({ it, onAck, onSave, onDismiss }) {
   /* Dismiss sits under the real controls, deliberately quiet: it is the escape hatch for an item
      you are not going to act on, not a shortcut past deciding one you are. */
   const dismissRow = onDismiss ? html`<div class="mt-4 pt-3 border-t border-edge/50 flex items-center gap-2 flex-wrap">
-      <button class="text-[12px] text-slate-400 hover:text-slate-200 underline decoration-dotted underline-offset-2"
-              onClick=${() => { const r = prompt('Dismiss this item without deciding it?\n\nOptional — why (recorded in the log):', ''); if (r !== null) onDismiss([it.item_id], r); }}>Dismiss without deciding</button>
-      <span class="text-[11px] text-slate-500">Clears it from the queue. Logged as dismissed, never as approved.</span>
+      <button class="px-2.5 py-1.5 rounded-lg border border-edge text-slate-400 hover:text-slate-200 hover:border-slate-500 text-[12px] inline-flex items-center gap-1.5"
+              title="Clear it without deciding — logged as dismissed, never as approved"
+              onClick=${() => { const r = prompt('Dismiss this item without deciding it?\n\nOptional — why (recorded in the log):', ''); if (r !== null) onDismiss([it.item_id], r); }}><span class="text-[13px] leading-none">✕</span> Dismiss</button>
+      <span class="text-[11px] text-slate-500">Clears it from the queue and moves you on. Logged as dismissed, never as approved.</span>
     </div>` : null;
   if (!d) return html`<div class="border-t border-edge pt-4 mt-6"><div class="text-[10px] uppercase tracking-widest text-slate-400 mb-2">${al ? 'Acknowledge' : 'Your decision'}</div><${Controls} it=${it} onAck=${onAck} onSave=${onSave}/>${dismissRow}</div>`;
   const ap = it.approval || {}; const by = ap.decided_by || it.ack_by || ''; const bl = String(by).toLowerCase(); const when = logDecidedAt(it); const resolved = ap.feedback || '';
@@ -565,7 +573,7 @@ export function Feedback() {
               <span></span><span>Agent</span><span>Type</span><span>Item</span><span>For</span><span class="justify-self-end">Age</span><span class="justify-self-end">Action</span>
             </div>
             <div class="divide-y divide-edge/60">
-              ${items.map(it => html`<${QueueRow} key=${it.item_id} it=${it} onOpen=${setOpenId} selected=${sel.has(it.item_id)} onToggle=${toggle} onAck=${ack} onApprove=${approveInline}/>`)}
+              ${items.map(it => html`<${QueueRow} key=${it.item_id} it=${it} onOpen=${setOpenId} selected=${sel.has(it.item_id)} onToggle=${toggle} onAck=${ack} onApprove=${approveInline} onDismiss=${dismiss}/>`)}
             </div>
           </div>`
         : html`<div class="rounded-xl border border-edge bg-panel p-10 text-center text-slate-400">${live.length ? html`Nothing matches these filters. <button class="text-accent hover:underline" onClick=${resetFilters}>Clear them</button> to see all ${live.length}.` : html`Nothing needs your response${fPerson !== 'all' ? ' for ' + cap(fPerson) : ''}. ✓`}</div>`}
