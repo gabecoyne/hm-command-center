@@ -33,7 +33,41 @@ Never leave `~/dev` with uncommitted Command Center changes at the end of a sess
 
 ## Deploy to the live dashboard
 
-The Drive `CommandCenter/` folder is the **served** copy. "Go live" = copy the code files from `~/dev` into Drive `CommandCenter/` (leave `data/` alone — it's the shared pool). The live dashboard stays on the old version until you deploy.
+**The live dashboard is Cloudflare Pages, project `hm-command-center`.**
+`https://command.hostmodern.co` (and `https://hm-command-center.pages.dev`), behind Cloudflare Access.
+
+Two things that are NOT the deploy, despite what this file used to say:
+
+- **The Drive `CommandCenter/` folder does not serve anything.** Its code half is dead — frozen at 2026-08-10, missing `Cro.js` and `Feedback.js`, still carrying the renamed `Attention.js`. Do not copy code into it and do not treat it as live. (Its `data/` subfolder is still the live Drive pool during the D1 migration — leave that alone.)
+- **`git push` does not deploy.** The Pages project was created as a **direct-upload** project (`source: null`); it has no Git connection, so nothing auto-builds. Every production deployment to date has trigger `ad_hoc`.
+
+### Going live = one command
+
+From a clean checkout of `main` (not the Drive copy):
+
+```
+git -C ~/dev/hm-command-center pull --ff-only
+set -a; source "<Drive>/Host Modern/Config/cloudflare_config.env"; set +a
+npx wrangler pages deploy . \
+  --project-name hm-command-center \
+  --branch main \
+  --commit-hash "$(git rev-parse HEAD)"
+```
+
+`CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` come from `Config/cloudflare_config.env`.
+`--branch main` is what makes it a **production** deploy — the project's production branch is `main`. Omit it and you get a preview URL only.
+
+Push to `main` first anyway: the deploy is an upload of your working tree, so an un-pushed commit means the live site and GitHub disagree with no record of what shipped. Passing `--commit-hash` is what ties a deployment back to a commit in the Cloudflare deployment list.
+
+**Verify after deploying** — the browser caches the ES modules, so a normal reload can keep showing the old UI even when the deploy succeeded. Fetch the asset itself rather than trusting the page:
+
+```js
+await (await fetch('/src/views/Cro.js?cb=' + Date.now(), {cache:'no-store'})).text()
+```
+
+### Known gap: Pages is not Git-connected
+
+Cloudflare cannot convert a direct-upload Pages project to a Git-connected one. Getting `git push` → auto-deploy means creating a **new** Pages project connected to `gabecoyne/hm-command-center` (production branch `main`, no build command, output dir `/`) and then re-attaching everything the current project owns: the `DB` D1 binding (`5355e921-e3fc-4bd9-acea-3a5b343ca2c2`), the `command.hostmodern.co` custom domain, and the Access application + policies + `hm-machine-runner` service token. Until someone does that migration, deploys are the manual command above.
 
 ## Cloud-session fallback (NOT preferred)
 
