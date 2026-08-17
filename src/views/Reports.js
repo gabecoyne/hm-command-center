@@ -161,7 +161,7 @@ export function Reports() {
   }
 
   return html`
-    <div class="max-w-[1100px]">
+    <div>
       <div class="mb-3 flex flex-wrap items-center gap-2">
         <input class="bg-ink border border-edge rounded-lg px-3 py-1.5 text-[13px] text-slate-200 placeholder:text-slate-500 focus:border-accent/60 focus:outline-none flex-1 min-w-[200px]"
                placeholder="Search reports — title, summary, agent…" value=${rSearch}

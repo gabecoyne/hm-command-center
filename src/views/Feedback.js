@@ -523,7 +523,7 @@ export function Feedback() {
         <p class="text-sm text-slate-300">The <b class="text-white">human ⇄ AI feedback loop</b>. The agents file what they need from you here — <b class="text-white">approvals</b> that need a decision and <b class="text-white">alerts</b> (risk / failure / performance) that are heads-up only. You answer in the same place: decide or comment on an approval, acknowledge an alert, or <b class="text-white">dismiss</b> anything you're not going to act on — dismissing clears it without recording a decision you didn't make.</p>
       </div>
 
-      <div class="max-w-[1000px] mb-3 flex flex-wrap items-center gap-2">
+      <div class="mb-3 flex flex-wrap items-center gap-2">
         <input class="bg-ink border border-edge rounded-lg px-3 py-1.5 text-[13px] text-slate-200 placeholder:text-slate-500 focus:border-accent/60 focus:outline-none flex-1 min-w-[200px]"
                placeholder="Search the queue — title, proposal, agent, seat…" value=${qSearch}
                onInput=${e => setQSearch(e.target.value.trim().toLowerCase())}/>
@@ -554,7 +554,7 @@ export function Feedback() {
       </div>
 
       ${selIds.length ? html`
-        <div class="max-w-[1000px] mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-accent/40 bg-accent/5 px-4 py-2.5">
+        <div class="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-accent/40 bg-accent/5 px-4 py-2.5">
           <span class="text-[13px] text-white font-medium">${selIds.length} selected</span>
           ${selAlerts.length ? html`<button class=${btn} disabled=${busy} onClick=${() => ackMany(selAlerts)}>Acknowledge ${selAlerts.length} alert${selAlerts.length === 1 ? '' : 's'}</button>` : null}
           <button class="px-3 py-1.5 rounded-lg text-[12px] bg-slate-700 text-slate-100 hover:bg-slate-600 disabled:opacity-40 disabled:pointer-events-none" disabled=${busy}
