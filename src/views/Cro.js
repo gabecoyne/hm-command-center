@@ -304,7 +304,7 @@ function PriceCard({ t }) {
         <div class="mt-3">
           <${ProgressBar} frac=${g.progress} callable=${g.callable}/>
           <div class="mt-1 flex justify-between text-[11px] font-mono text-slate-500">
-            <span>${num(g.orders_collected)} / ${num(g.min_orders_to_call)} orders</span>
+            <span>${num(g.orders_collected)} / ${num(g.min_orders_to_call)} store orders</span>
             <span>${g.callable ? 'both gates open' : (g.sample_met ? `sample met · p=${p_(g.p_value)}` : 'sample gate closed')}</span>
           </div>
         </div>
@@ -318,12 +318,10 @@ function PriceCard({ t }) {
               ${t.inverted_success_criterion}
             </div>` : null}
 
-          ${(t.confounders || []).map(c => html`
-            <div class="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2.5 text-[12.5px] text-amber-100">
-              <span class="text-[10px] uppercase tracking-widest text-amber-300 block mb-1">Confounder · ${c.date}</span>
-              <div class="font-medium">${c.summary}</div>
-              ${c.effect_on_this_test ? html`<div class="mt-1 text-amber-200/80">${c.effect_on_this_test}</div>` : null}
-            </div>`)}
+          <!-- Confounders are deliberately NOT rendered (Collin, 2026-08-16: the banners
+               buried the numbers). They stay in price_tests.json, still ride through the
+               snapshot, and are still passed to the Ask prompt below, so the analysis keeps
+               accounting for them. They are simply not shown. Do not re-add them here. -->
 
           <div class="overflow-x-auto">
             <table class="w-full text-[13px]">
@@ -336,17 +334,21 @@ function PriceCard({ t }) {
                 </tr>
               </thead>
               <tbody>
-                ${row('Attach per 1,000 orders', b.attach_per_1k, o.attach_per_1k, sgn(dl.attach_pct))}
-                ${row('Realized ASP', money(b.realized_asp), money(o.realized_asp), dmoney(dl.asp_abs))}
-                ${row('Contribution per 1,000 orders', usd_(b.contribution_per_1k), usd_(o.contribution_per_1k), sgn(dl.contribution_pct))}
-                ${row('Orders / units', num(b.orders) + ' / ' + num(b.units), num(o.orders) + ' / ' + num(o.units), '—')}
+                ${/* Labels say "store orders" on purpose. Every denominator here is TOTAL
+                      store orders in the window, not orders containing this product. Reading
+                      "57 of 1,930 orders" as "57 Kit orders" inverts the whole card
+                      (Collin, 2026-08-16). Do not shorten these back to "orders". */''}
+                ${row('Units sold per 1,000 store orders', b.attach_per_1k, o.attach_per_1k, sgn(dl.attach_pct))}
+                ${row('Average selling price', money(b.realized_asp), money(o.realized_asp), dmoney(dl.asp_abs))}
+                ${row('Contribution per 1,000 store orders', usd_(b.contribution_per_1k), usd_(o.contribution_per_1k), sgn(dl.contribution_pct))}
+                ${row('Store orders / units sold', num(b.orders) + ' / ' + num(b.units), num(o.orders) + ' / ' + num(o.units), '—')}
               </tbody>
             </table>
           </div>
 
           ${!g.callable ? html`
             <div class="text-[12px] text-slate-500">
-              Not callable yet — ${num(g.min_orders_to_call - g.orders_collected)} more orders needed
+              Not callable yet — ${num(g.min_orders_to_call - g.orders_collected)} more store orders needed
               ${g.eta_callable && g.eta_callable !== 'sample reached' ? `, roughly ${g.eta_callable} at the current rate` : ''}.
               A pre/post price test at this sample cannot separate a real move from noise.
             </div>` : null}
@@ -355,9 +357,9 @@ function PriceCard({ t }) {
             <div class="rounded-lg border border-edge bg-panel2/40 px-3 py-2.5">
               <div class="text-[10px] uppercase tracking-widest text-slate-500 mb-1">Threshold</div>
               <div class="text-slate-300">
-                Alert at ${(t.thresholds || {}).alert_attach_per_1k}/1k
-                ${(t.thresholds || {}).alert_is_breakeven ? ' (breakeven)' : ' (widened — see rationale)'}.
-                Today ${o.attach_per_1k == null ? '—' : o.attach_per_1k}/1k.
+                Alert if units per 1,000 store orders fall below ${(t.thresholds || {}).alert_attach_per_1k}
+                ${(t.thresholds || {}).alert_is_breakeven ? ' (breakeven)' : ' (widened)'}.
+                Currently ${o.attach_per_1k == null ? '—' : o.attach_per_1k}.
               </div>
               ${(t.thresholds || {}).rationale ? html`<div class="mt-1 text-slate-500">${t.thresholds.rationale}</div>` : null}
             </div>
