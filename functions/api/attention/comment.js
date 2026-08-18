@@ -1,9 +1,9 @@
-import { json, insertRecord, foldFromDB, nowChicagoISO } from "../../_shared/attn.js";
+import { json, insertRecord, foldFromDB, nowChicagoISO, actorFor } from "../../_shared/attn.js";
 export async function onRequestPost(ctx) {
   let b;
   try { b = (await ctx.request.json()) || {}; } catch (e) { return json({ error: "invalid JSON" }, 400); }
   const item_id = b.item_id;
-  const by = b.by || (ctx.data.identity ? ctx.data.identity.email : null);
+  const by = actorFor(ctx, b.by);
   const text = (b.text || "").trim();
   const author_kind = b.author_kind || "human";
   if (!item_id || !by) return json({ error: "item_id and by are required" }, 400);

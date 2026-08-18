@@ -113,7 +113,8 @@ function logDecidedAt(it) { const ap = it.approval || {}; return it.dismissed_at
 
 /* ---------- raw-HTML inner fragments for the rows (rendered via dangerouslySetInnerHTML) ---------- */
 function cardInner(it) { const type = it.type || 'approval'; const tl = TL[type] || type; const tc = TC[type] || 'bg-slate-700 text-slate-300'; const ap = it.approval || {};
-  const title = it.title || ''; let preview = isAlert(it) ? (it.detail || '') : (ap.question || ap.proposal || ap.what_i_found || ''); if (preview === title) preview = ap.proposal || ap.what_i_found || '';
+  const title = it.title || ''; const sd = splitDetail(it);
+  let preview = isAlert(it) ? sd.body : (ap.question || ap.proposal || ap.what_i_found || sd.body || ''); if (preview === title) preview = ap.proposal || ap.what_i_found || sd.body || '';
   const m = seatForSource(it.source); const am = actorMeta(it);
   return `<span class="h-2 w-2 rounded-full shrink-0 ${PRI[it.severity] || 'bg-slate-600'}" title="${esc(it.severity || '')}"></span>
     ${agentCell(m)}
@@ -132,9 +133,34 @@ function logRowInner(it) { const m = seatForSource(it.source); const type = it.t
     ${by ? assigneeCell(by) : '<span class="text-[11px] text-slate-500">—</span>'}
     <span class="text-[11px] font-mono text-slate-400 justify-self-end whitespace-nowrap" title="${esc(when)}">${esc(when ? String(when).slice(0, 10) : '—')}</span>`; }
 function historyHTML(it) { const h = (it.history || []); if (!h.length) return ''; return `<div class="text-[10px] uppercase tracking-widest text-slate-400 mb-2 mt-6">History</div><div class="space-y-2.5">${h.slice().reverse().map(e => `<div class="flex gap-2.5 text-[12px]"><span class="text-slate-500 font-mono shrink-0 w-[88px]">${esc(String(e.ts || '').slice(0, 10))}</span><div class="min-w-0"><span class="text-slate-200">${esc(e.by || '?')}</span> <span class="text-slate-400 lowercase">${esc(DEC_LABELS[e.action] || e.action || '')}</span>${e.note ? `<div class="text-slate-400 mt-0.5 whitespace-pre-wrap">${esc(e.note)}</div>` : ''}</div></div>`).join('')}</div>`; }
+/* An item's body can live in two places: `approval.detail` (decisions) or the TOP-LEVEL `detail`
+   (alerts, which carry no approval object at all). The drawer only ever read the approval fields,
+   so every alert's body — often the entire weekly digest — was silently dropped and the view then
+   concluded "the title is the whole item", which was false. Read both.
+
+   Second wrinkle: when a producer files a title longer than the cap, the contract shortens it and
+   PREPENDS the full original to `detail` so nothing is lost. That makes detail's first paragraph a
+   duplicate of the title. Split it back out — the full text belongs in the heading, not repeated
+   as the first line of the body. */
+function splitDetail(it) {
+  const raw = String((it && it.detail) || '').trim();
+  const short = String((it && it.title) || '').replace(/[…]+$/, '').trim();
+  if (!raw || !short) return { fullTitle: null, body: raw };
+  const cut = raw.indexOf('\n\n');
+  const first = (cut < 0 ? raw : raw.slice(0, cut)).trim();
+  const probe = short.slice(0, Math.min(short.length, 60));
+  if (probe && first.startsWith(probe)) {
+    return { fullTitle: first, body: cut < 0 ? '' : raw.slice(cut + 2).trim() };
+  }
+  return { fullTitle: null, body: raw };
+}
+// The heading a human should read: the untruncated title when we have it.
+const fullTitleOf = it => (splitDetail(it).fullTitle || (it && it.title) || 'Item');
+
 function drawerBodyTop(it) { const type = it.type || 'approval'; const m = seatForSource(it.source); const ap = it.approval || {}; const bd = 'font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-white/5 text-slate-400';
   const sec = (label, val) => val ? `<div class="text-[10px] uppercase tracking-widest text-slate-400 mb-1 mt-4">${label}</div><div class="md-body">${mdToHtml(val)}</div>` : '';
-  const anyBody = ap.what_i_found || ap.proposal || ap.detail || ap.expected_outcome || ap.question;
+  const { body } = splitDetail(it);
+  const anyBody = body || ap.what_i_found || ap.proposal || ap.detail || ap.expected_outcome || ap.question;
   return `<div class="flex flex-wrap items-center gap-2 mb-1">${agentAv(m, 20)}<span class="text-[12px] text-white">${esc(m.name)}</span>${(m.director || m.manager) ? `<span class="text-[10px] text-slate-400">${[m.director, m.manager].filter(Boolean).map(esc).join(' ▸ ')}</span>` : ''}<span class="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded ${TC[type] || 'bg-slate-700 text-slate-300'}">${esc(TL[type] || type)}</span>${it.owner ? `<span class="${bd} inline-flex items-center gap-1">→ ${(String(it.owner).toLowerCase() === 'gabe' || String(it.owner).toLowerCase() === 'collin') ? userAv(String(it.owner).toLowerCase(), 16) : ''}${esc(it.owner)}</span>` : ''}${it.severity ? `<span class="${bd}">${esc(it.severity)}</span>` : ''}${it.seat ? `<span class="${bd}">${esc(String(it.seat).replace(/_/g, ' '))}</span>` : ''}<span class="text-[10px] font-mono text-slate-500">${esc(it.source || '')}</span>${it.generated_at ? `<span class="text-[11px] font-mono text-slate-400 ml-auto" title="${esc(it.generated_at)}">${esc(String(it.generated_at).slice(0, 10))}</span>` : ''}</div>
     ${isAlert(it) ? '' : (() => { const am = actorMeta(it); const a = actorOf(it);
       const tone = a === 'human' ? 'border-amber-400/40 bg-amber-500/10' : a === 'agent' ? 'border-emerald-500/30 bg-emerald-500/[.07]' : 'border-slate-600/50 bg-slate-700/20';
@@ -143,11 +169,12 @@ function drawerBodyTop(it) { const type = it.type || 'approval'; const m = seatF
         <span class="text-[12px] text-slate-200 leading-snug">${esc(am.line(m.name))}</span></div>`; })()}
     ${it.resolves_by ? `<p class="text-[11px] font-mono text-amber-300 mt-2">Resolves by ${esc(String(it.resolves_by).slice(0, 10))}</p>` : ''}
     ${ap.question ? `<p class="text-sm text-white mt-3">${esc(ap.question)}</p>` : ''}
+    ${sec(isAlert(it) ? 'What the agent found' : 'Description', body)}
     ${sec('What the agent found', ap.what_i_found)}
     ${sec('Proposal', ap.proposal)}
     ${sec('Detail', ap.detail)}
     ${sec('Expected outcome', ap.expected_outcome)}
-    ${anyBody ? '' : `<p class="text-sm text-slate-400 mt-3">${isAlert(it) ? 'Heads-up only — the title is the whole item. Acknowledge to clear it.' : 'No extra detail was attached to this item.'}</p>`}`; }
+    ${anyBody ? '' : `<p class="text-sm text-slate-400 mt-3">${isAlert(it) ? 'Heads-up only, and the agent attached nothing beyond the headline. Acknowledge to clear it.' : 'No extra detail was attached to this item.'}</p>`}`; }
 
 /* ---------- components ---------- */
 /* Inline actions — clear the obvious ones without opening anything.
@@ -305,7 +332,8 @@ function Drawer({ it, pos, total, onClose, onAck, onSave, onDismiss, onPrev, onN
       <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick=${onClose}></div>
       <aside ref=${body} class="absolute right-0 top-0 h-full w-full sm:max-w-[580px] bg-panel border-l border-edge overflow-y-auto slidein">
         <div class="sticky top-0 flex items-center gap-3 px-5 h-14 border-b border-edge bg-panel/95 backdrop-blur z-10">
-          <span class="text-white font-semibold truncate flex-1">${it.title || 'Item'}</span>
+          <span class="text-white font-semibold flex-1 min-w-0 leading-snug text-[15px]" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden"
+                title=${fullTitleOf(it)}>${fullTitleOf(it)}</span>
           ${pos > 0 ? html`<div class="flex items-center gap-1 shrink-0">
             <button class=${nav} title="Previous (↑)" disabled=${pos <= 1} onClick=${onPrev}>↑</button>
             <span class="text-[11px] font-mono text-slate-400 tabular-nums">${pos}/${total}</span>

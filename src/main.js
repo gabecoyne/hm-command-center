@@ -46,7 +46,7 @@ function App() {
   };
 
   return html`
-    <${Sidebar} view=${view} setView=${go} user=${s.user} setUser=${setUser} connected=${s.connected} loading=${s.loading} badges=${badges} open=${nav} onClose=${() => setNav(false)}/>
+    <${Sidebar} view=${view} setView=${go} user=${s.user} setUser=${setUser} connected=${s.connected} loading=${s.loading} identity=${s.identity} badges=${badges} open=${nav} onClose=${() => setNav(false)}/>
     <div class="md:ml-[220px]">
       <${Header} title=${TITLES[view]} onMenu=${() => setNav(true)}/>
       <main class="p-3 md:p-6">

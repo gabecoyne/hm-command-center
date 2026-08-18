@@ -15,7 +15,22 @@ export const aPut = async (p, d) => {
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
 };
-export const aHealth = async () => { try { return (await fetch((CONFIG.apiBase || '') + '/api/health')).ok; } catch { return false; } };
+export const normalizePerson = e => {
+  const v = String(e || '').trim().toLowerCase();
+  if (v === 'gabe' || v.startsWith('gabe@')) return 'gabe';
+  if (v === 'collin' || v.startsWith('collin@')) return 'collin';
+  return null;
+};
+/* Returns {ok, identity} — /api/health echoes back the Cloudflare Access identity the middleware
+   verified, which is how the app knows whether it's Gabe or Collin without asking. */
+export const aHealth = async () => {
+  try {
+    const r = await fetch((CONFIG.apiBase || '') + '/api/health');
+    if (!r.ok) return { ok: false, identity: null };
+    const j = await r.json().catch(() => ({}));
+    return { ok: true, identity: (j && j.identity) || null };
+  } catch { return { ok: false, identity: null }; }
+};
 
 export async function load() {
   const [attn, roster, elog, tasks, dash, inv, reports, analysis, life, sched, model, cash, calib, runs, cro, price] = await Promise.all([
@@ -107,8 +122,17 @@ export async function putTasks(tasksObj) {
 }
 
 export async function boot() {
-  const ok = await aHealth();
-  setState({ connected: ok });
+  const { ok, identity } = await aHealth();
+  const patch = { connected: ok };
+  /* A verified human identity is authoritative — it decides whose queue you land on and whose name
+     goes on your decisions. Service tokens and local dev (no Access in front) leave it null and the
+     manual switcher stays in charge. */
+  if (identity && identity.kind === 'human') {
+    const who = normalizePerson(identity.email);
+    patch.identity = { ...identity, person: who };
+    if (who) { patch.user = who; try { localStorage.setItem('hm_user', who); } catch {} }
+  }
+  setState(patch);
   try { await load(); } catch { setState({ loading: false }); }
   return setInterval(() => load().catch(() => {}), CONFIG.pollMs);
 }

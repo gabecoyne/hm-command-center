@@ -32,7 +32,29 @@ const ACTORS = ["agent","human"];
 const APPROVAL_FIELDS = ["question","options","what_i_found","proposal","expected_outcome","detail",
   "actor","decision","feedback","decided_by","decided_at","ack_at","ack_by"];
 export const HUMAN_APPROVAL_FIELDS = ["decision","feedback","decided_by","decided_at","ack_at","ack_by"];
-const TITLE_MAX_APPEND = 100, TITLE_MAX_FOLD = 160;
+/* Title caps (tightened 2026-08-17, Gabe). The title IS the TLDR — skimmable in one glance in a
+   dense list, and readable in the drawer heading without clipping. 100 chars was still a paragraph
+   fragment that got cut off in both places. Over APPEND we shorten and move the full text into
+   `detail` (the drawer shows it as the heading, so nothing is lost); over FOLD we reject outright,
+   because at that length the producer isn't writing a title at all. */
+const TITLE_MAX_APPEND = 80, TITLE_MAX_FOLD = 120;
+
+/* WHO DID THIS. A human request arrives with a Cloudflare Access-verified email header; a client
+   -supplied `by` is only a claim. Trusting the claim meant the browser could stamp a decision with
+   the other person's name — the decision log is an audit trail, so it has to record who was
+   actually signed in. Service tokens (the dispatcher, collectors) have no human identity and keep
+   naming themselves through the body. */
+export const normalizePerson = e => {
+  const v = String(e || "").trim().toLowerCase();
+  if (v === "gabe" || v.startsWith("gabe@")) return "gabe";
+  if (v === "collin" || v.startsWith("collin@")) return "collin";
+  return v;
+};
+export function actorFor(ctx, bodyBy) {
+  const id = ctx && ctx.data && ctx.data.identity;
+  if (id && id.kind === "human" && id.email) return normalizePerson(id.email);
+  return bodyBy ? normalizePerson(bodyBy) : (id ? id.email : null);
+}
 
 export class AttentionError extends Error { constructor(m){ super(m); this.name = "AttentionError"; } }
 

@@ -1,5 +1,6 @@
 // Left sidebar: brand, nav (with badges), "reviewing as" user switch, conn dot.
 import { html } from '../html.js';
+import { userAv } from '../lib/avatars.js';
 
 const TOP = [
   { id: 'dashboard', glyph: '▚', label: 'Dashboard' },
@@ -35,7 +36,11 @@ function UserBtn({ id, label, user, setUser }) {
     </button>`;
 }
 
-export function Sidebar({ view, setView, user, setUser, connected, loading, badges, open, onClose }) {
+/* Identity comes from Cloudflare Access when the app is served behind it, so this is a STATUS
+   readout, not a control — the server stamps every write with the verified email regardless of
+   what the client claims. The manual switcher only appears without Access (local dev via
+   server.py), where there is no identity to verify. */
+export function Sidebar({ view, setView, user, setUser, connected, loading, identity, badges, open, onClose }) {
   return [
     open ? html`<div onClick=${onClose} class="fixed inset-0 bg-black/50 z-30 md:hidden"></div>` : null,
     html`
@@ -52,11 +57,19 @@ export function Sidebar({ view, setView, user, setUser, connected, loading, badg
         ${AGENTIC.map(item => html`<${NavBtn} item=${item} view=${view} setView=${setView} badges=${badges}/>`)}
       </nav>
       <div class="p-3 border-t border-edge">
-        <div class="text-[10px] uppercase tracking-widest text-slate-400 mb-1.5">Reviewing as</div>
-        <div class="flex gap-1">
-          <${UserBtn} id="gabe" label="Gabe" user=${user} setUser=${setUser}/>
-          <${UserBtn} id="collin" label="Collin" user=${user} setUser=${setUser}/>
-        </div>
+        ${identity && identity.person ? html`
+          <div class="text-[10px] uppercase tracking-widest text-slate-400 mb-1.5">Signed in as</div>
+          <div class="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-panel2/60 border border-edge" title=${'Cloudflare Access · ' + (identity.email || '')}>
+            <span dangerouslySetInnerHTML=${{ __html: userAv(identity.person, 20) }}></span>
+            <span class="text-[13px] text-white capitalize">${identity.person}</span>
+            <span class="ml-auto text-[9px] font-mono uppercase tracking-wider text-slate-500" title="identity verified by Cloudflare Access, not chosen here">verified</span>
+          </div>`
+        : html`
+          <div class="text-[10px] uppercase tracking-widest text-slate-400 mb-1.5">Reviewing as</div>
+          <div class="flex gap-1">
+            <${UserBtn} id="gabe" label="Gabe" user=${user} setUser=${setUser}/>
+            <${UserBtn} id="collin" label="Collin" user=${user} setUser=${setUser}/>
+          </div>`}
         <div class="mt-2 flex items-center gap-1.5 text-[11px] font-mono">
           <span class="h-1.5 w-1.5 rounded-full ${connected ? 'bg-accent' : (loading ? 'bg-amber-400 animate-pulse' : 'bg-slate-600')}"></span>${connected ? 'live' : (loading ? 'connecting…' : 'offline · read-only')}
         </div>

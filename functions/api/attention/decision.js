@@ -1,4 +1,4 @@
-import { json, insertRecord, foldFromDB, nowChicagoISO, RECORD_KINDS, STATUSES } from "../../_shared/attn.js";
+import { json, insertRecord, foldFromDB, nowChicagoISO, RECORD_KINDS, STATUSES, actorFor } from "../../_shared/attn.js";
 
 // Records ONE human response, or — when `item_ids` is supplied — the same response across many
 // items in a single round trip. Bulk matters: clearing a 100-item backlog one POST at a time
@@ -8,7 +8,7 @@ export async function onRequestPost(ctx) {
   let b;
   try { b = (await ctx.request.json()) || {}; } catch (e) { return json({ error: "invalid JSON" }, 400); }
   const ids = Array.isArray(b.item_ids) && b.item_ids.length ? b.item_ids : (b.item_id ? [b.item_id] : []);
-  const by = b.by || (ctx.data.identity ? ctx.data.identity.email : null);
+  const by = actorFor(ctx, b.by);
   const kind = b.kind || "decision";
   if (!ids.length || !by) return json({ error: "item_id (or item_ids) and by are required" }, 400);
   if (!RECORD_KINDS.includes(kind)) return json({ error: `kind must be one of ${RECORD_KINDS.join(", ")}` }, 400);

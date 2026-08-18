@@ -18,7 +18,12 @@ const state = {
   roadmap: { products: [] },
   connected: false,
   loading: true,
+  /* Who you are. Seeded from localStorage so the first paint has something, then OVERWRITTEN by the
+     Cloudflare Access identity as soon as /api/health answers. `identity` non-null means the server
+     verified it — the sidebar then shows who you're signed in as instead of offering a toggle,
+     because the server stamps writes with the verified email regardless of what the client says. */
   user: (() => { try { return localStorage.getItem('hm_user') || 'gabe'; } catch { return 'gabe'; } })(),
+  identity: null,
 };
 
 const listeners = new Set();
