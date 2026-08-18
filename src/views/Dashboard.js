@@ -67,10 +67,21 @@ function buildMktg(dash, model){
   const k=dash.kpis,t=dash.targets||{},tr=dash.trend||{dates:[],revenue:[],spend:[],roas:[]};
   const goal=monthGoal(model);
   const now=new Date(),cmNum=now.getMonth()+1,dim=new Date(now.getFullYear(),now.getMonth()+1,0).getDate(),today=now.getDate();
-  const dayRev={};(tr.dates||[]).forEach((d,i)=>{const pr=String(d).split('-');const mm=+pr[0],dd=+pr[1];if(mm===cmNum)dayRev[dd]=(tr.revenue||[])[i]||0;});
+  // Prefer the snapshot's full-month series. Deriving MTD from the rolling 14-day trend dropped
+  // every day before the window opened — on the 18th the line began at day 4 and under-reported the
+  // month by ~$34K against the KPI tile beside it (2026-08-17). The trend is only a fallback now.
+  const dayRev={};
+  if(dash.mtd && (dash.mtd.days||[]).length){
+    (dash.mtd.days||[]).forEach((d,i)=>{dayRev[d]=(dash.mtd.revenue||[])[i]||0;});
+  } else {
+    (tr.dates||[]).forEach((d,i)=>{const pr=String(d).split('-');const mm=+pr[0],dd=+pr[1];if(mm===cmNum)dayRev[dd]=(tr.revenue||[])[i]||0;});
+  }
+  // The last day we actually have data for. Plotting null past it keeps the line from flat-lining
+  // across the rest of the month.
+  const through=(dash.mtd && dash.mtd.through) ? dash.mtd.through : today;
   const labels=[],expected=[],actual=[];let cum=0,haveAny=false;
   for(let i=1;i<=dim;i++){labels.push(i);expected.push(goal?Math.round(goal*i/dim):null);
-    if(i<=today){if(dayRev[i]!=null){cum+=dayRev[i];haveAny=true;}actual.push(haveAny?cum:null);}else actual.push(null);}
+    if(i<=through){if(dayRev[i]!=null){cum+=dayRev[i];haveAny=true;}actual.push(haveAny?cum:null);}else actual.push(null);}
   const goalCfg={type:"line",data:{labels,datasets:[
     {label:"Actual (MTD)",data:actual,borderColor:'#34d399',backgroundColor:'rgba(52,211,153,.12)',fill:true,tension:.25,pointRadius:0,spanGaps:true},
     {label:"Plan to goal",data:expected,borderColor:'#64748b',borderDash:[5,4],pointRadius:0,tension:0}]},options:gopt()};

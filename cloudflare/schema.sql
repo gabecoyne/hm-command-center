@@ -30,3 +30,15 @@ CREATE TABLE IF NOT EXISTS attention_decisions (
   record_json  TEXT NOT NULL      -- {item_id, kind, by, ts, decision?, feedback?, status?, text?, author_kind?}
 );
 CREATE INDEX IF NOT EXISTS idx_dec_item ON attention_decisions(item_id, ts, id);
+
+-- 3) report_records : the human side of the Reports shelf, append-only for the same reason the
+--    attention queue is. `reports.json` is a `documents` blob that the dispatcher REWRITES from
+--    Drive every tick, so read-state and comments stored inside it were erased on the next sync
+--    (which is why "mark read" never stuck). Records live outside the blob and are folded on read.
+CREATE TABLE IF NOT EXISTS report_records (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  report_id    TEXT NOT NULL,
+  ts           TEXT NOT NULL,     -- Chicago ISO-8601; fold applies records oldest-first
+  record_json  TEXT NOT NULL      -- {report_id, kind: read|comment, by, ts, text?, author_kind?}
+);
+CREATE INDEX IF NOT EXISTS idx_rep_rec ON report_records(report_id, ts, id);

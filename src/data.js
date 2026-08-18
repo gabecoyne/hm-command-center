@@ -41,7 +41,11 @@ export async function load() {
     aGet('tasks.json').catch(() => ({ tasks: [], columns: ['backlog', 'scheduled', 'in_progress', 'done'] })),
     aGet('dashboard.json').catch(() => null),
     aGet('inventory.json').catch(() => null),
-    aGet('reports.json').catch(() => ({ items: [] })),
+    /* Folded: reports.json (the blob the dispatcher rewrites nightly) + the append-only record
+       table that carries read-state and comments. Falls back to the raw blob wherever the folded
+       endpoint isn't available. */
+    fetch((CONFIG.apiBase || '') + '/api/reports/state').then(r => r.ok ? r.json() : Promise.reject())
+      .catch(() => aGet('reports.json').catch(() => ({ items: [] }))),
     aGet('analysis.json').catch(() => ({ items: {} })),
     aGet('lifecycle.json').catch(() => null),
     aGet('schedule.json').catch(() => null),
@@ -103,6 +107,14 @@ export async function postComment(rec) {
   const attn = await aPost('/api/attention/comment', rec);
   setState({ attn });
   return attn;
+}
+
+// Record one human action on a report — `read` (acknowledge) or `comment` (a note the producing
+// agent answers on its next run). Returns the freshly folded shelf.
+export async function postReportRecord(rec) {
+  const reports = await aPost('/api/reports/record', rec);
+  setState({ reports });
+  return reports;
 }
 
 // Refold from the server (used after a write conflict or on demand).

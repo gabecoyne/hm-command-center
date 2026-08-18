@@ -3,8 +3,8 @@
 import { html } from '../html.js';
 import { useState, useEffect, useMemo } from 'preact/hooks';
 import { useStore, getState, currentUser } from '../state.js';
-import { aPut, postItem, postDecision } from '../data.js';
-import { esc, cap, mdToHtml, nowCT } from '../lib/format.js';
+import { postReportRecord } from '../data.js';
+import { esc, cap, mdToHtml, nowCT, schWhen } from '../lib/format.js';
 import { avatarSigil, forAvatars } from '../lib/avatars.js';
 import { banner, copyPrompt } from '../components/Toasts.js';
 
@@ -36,7 +36,7 @@ function Row({ r, onOpen }) {
   const unread = !r.read;
   const fmt = (r.format || (isHtmlReport(r) ? 'html' : 'md')).toUpperCase();
   return html`
-    <div class="reprow ${RGC} hover:bg-panel2/40 cursor-pointer" title=${'from ' + (r.source || 'agent')} onClick=${() => onOpen(r)}>
+    <div class="reprow ${RGC} hover:bg-panel2/40 cursor-pointer" title=${'from ' + (r.source || 'agent')} onClick=${() => onOpen()}>
       <span class="h-2 w-2 rounded-full ${unread ? 'bg-accent' : 'bg-slate-700'}" title=${unread ? 'unread' : 'read'}></span>
       <span class="justify-self-center" dangerouslySetInnerHTML=${{ __html: avatarSigil(r.source || 'agent', 24) }}></span>
       <span class="justify-self-center" dangerouslySetInnerHTML=${{ __html: forAvatars(reportFor(r), 20) }}></span>
@@ -46,37 +46,47 @@ function Row({ r, onOpen }) {
         ${r.summary ? html`<div class="text-[11px] text-slate-400 truncate">${r.summary}</div>` : null}
       </div>
       <span class="min-w-0 font-mono text-[10px] text-slate-400 truncate">${r.date || ''}</span>
-      <span class="justify-self-start font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-white/5 text-slate-400">${fmt}</span>
+      <span class="justify-self-start font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded ${r.awaiting === 'agent' ? 'bg-sky-500/15 text-sky-300' : 'bg-white/5 text-slate-400'}"
+            title=${r.awaiting === 'agent' ? 'you commented — the agent answers on its next run' : (r.thread || []).length ? 'has a conversation' : ''}>${(r.thread || []).length ? '💬 ' + r.thread.length : fmt}</span>
       <span class="text-[11px] text-emerald-400/80 justify-self-end">›</span>
     </div>`;
 }
 
-function Drawer({ r, onClose, onRead }) {
+/* The conversation on a report. Same contract as a Feedback item's thread: a human comment leaves
+   the report `awaiting: "agent"`, and the producing agent answers it on its next run (it queries
+   `hm_reports.py unanswered --source <task_id>` at Step 0). Read-only here; posting goes through
+   the append-only record endpoint. */
+function threadHtml(r) {
+  const th = (r.thread || []);
+  if (!th.length) return '';
+  return `<div class="text-[10px] uppercase tracking-widest text-slate-400 mb-2 mt-5">Conversation${r.awaiting ? ` · awaiting ${esc(r.awaiting)}` : ''}</div><div class="space-y-3">` +
+    th.map(m => { const agent = (m.author_kind || '') === 'agent';
+      return `<div class="flex gap-2.5 text-[12px]"><span class="text-slate-500 font-mono shrink-0 w-[88px]">${esc(String(m.ts || '').slice(0, 10))}</span><div class="min-w-0 flex-1"><span class="${agent ? 'text-emerald-300' : 'text-sky-300'}">${esc(m.by || (agent ? 'agent' : '?'))}</span>${agent ? ' <span class="text-[9px] uppercase tracking-wide text-slate-500">agent</span>' : ''}<div class="text-slate-300 mt-0.5 whitespace-pre-wrap">${esc(m.text || '')}</div></div></div>`;
+    }).join('') + `</div>`;
+}
+
+function Drawer({ r, onClose, onRead, onComment }) {
   const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
   if (!r) return null;
   const unread = !r.read;
   const fmt = (r.format || (isHtmlReport(r) ? 'html' : 'md')).toUpperCase();
   const forList = reportFor(r);
   const bd = 'font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-white/5 text-slate-400';
 
+  /* A comment is a message to the agent that wrote this, not a Feedback item. It used to be filed as
+     a fake `approval` with decision "answered" — which put a decision nobody made into the decision
+     log and buried the note where its own author would never look. It is now a record on the report,
+     and the producing agent reads it back on its next run. */
   async function saveNote() {
-    const v = note.trim(); if (!v) return;
-    const now = nowCT(), by = currentUser(), day = now.slice(0, 10);
-    const slug = ((String(r.id).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'note').slice(0, 48).replace(/-+$/, '')) || 'note';
-    const iid = `integrator-${day}-note-${slug}`;
-    const item = {
-      item_id: iid, owner: by, seat: 'integrator', type: 'approval', severity: 'normal',
-      title: ('Note on: ' + (r.title || r.id)).slice(0, 160), link: `/?view=feedback&item=${iid}`,
-      source: r.source || 'human', generated_at: now, resolves_by: null, status: 'open', resolved_at: null, dedup_key: null, ack_at: null, ack_by: null,
-      approval: { question: v, options: [], what_i_found: null, proposal: null, expected_outcome: null, detail: null, decision: 'answered', feedback: v, decided_by: by, decided_at: now, ack_at: null, ack_by: null },
-    };
-    /* Two creates, never a whole-queue write: the item file, then the answer as its own record. */
-    const { decision, feedback, decided_by, decided_at, ...ap } = item.approval;
+    const v = note.trim(); if (!v || busy) return;
+    setBusy(true);
     try {
-      await postItem({ ...item, approval: ap });
-      await postDecision({ item_id: iid, kind: 'decision', by, decision: 'answered', feedback: v });
-      setNote(''); banner('ok', 'Note filed to the attention queue — the agent picks it up next run.');
-    } catch (e) { banner('err', 'Note save failed. ' + esc(e.message)); }
+      await postReportRecord({ report_id: r.id, kind: 'comment', by: currentUser(), text: v, author_kind: 'human' });
+      setNote('');
+      banner('ok', `Comment saved — ${esc(r.source || 'the agent')} answers it on its next run.`);
+    } catch (e) { banner('err', 'Comment failed. ' + esc(e.message)); }
+    finally { setBusy(false); }
   }
 
   return html`
@@ -99,10 +109,18 @@ function Drawer({ r, onClose, onRead }) {
           ${r.path ? html`<div class="text-[11px] font-mono text-slate-400 mb-3">${r.path}</div>` : null}
           <div class="flex flex-wrap gap-2 items-center border-t border-edge pt-3">
             <button onClick=${() => copyPrompt(r.prompt || ("Let's talk through " + (r.path || r.title || '')))} class="px-3 py-1.5 rounded-lg bg-accent/15 border border-accent/30 text-emerald-300 text-xs font-semibold hover:bg-accent/25">💬 Chat with Claude</button>
-            ${unread ? html`<button onClick=${() => onRead(r)} class="px-3 py-1.5 rounded-lg border border-edge text-slate-300 text-xs hover:text-white">✓ Mark read</button>` : null}
-            <input value=${note} onInput=${e => setNote(e.target.value)} class="flex-1 min-w-[180px] bg-ink border border-edge rounded-lg px-3 py-1.5 text-sm" placeholder="Drop a note for the agent…"/>
-            <button onClick=${saveNote} class="px-3 py-1.5 rounded-lg border border-edge text-slate-300 text-xs hover:text-white">Save note</button>
+            ${unread ? html`<button onClick=${() => onRead(r)} class="px-3 py-1.5 rounded-lg border border-edge text-slate-300 text-xs hover:text-white">✓ Acknowledge</button>`
+              : html`<span class="text-[11px] text-slate-400">read${r.read_by ? ' by ' + cap(r.read_by) : ''}${r.read_at ? ' · ' + schWhen(r.read_at) : ''}</span>`}
           </div>
+          <div class="mt-3 flex flex-wrap gap-2 items-center">
+            <input value=${note} onInput=${e => setNote(e.target.value)}
+                   onKeyDown=${e => { if (e.key === 'Enter') saveNote(); }}
+                   class="flex-1 min-w-[220px] bg-ink border border-edge rounded-lg px-3 py-1.5 text-sm"
+                   placeholder=${'Comment for ' + (r.source || 'the agent') + '…'}/>
+            <button onClick=${saveNote} disabled=${busy || !note.trim()} class="px-3 py-1.5 rounded-lg bg-accent text-ink text-xs font-semibold hover:brightness-110 disabled:opacity-40 disabled:pointer-events-none">Comment</button>
+            <span class="text-[11px] text-slate-500 w-full">${esc(r.source || 'The agent')} reads this on its next run and answers here.</span>
+          </div>
+          <div dangerouslySetInnerHTML=${{ __html: threadHtml(r) }}></div>
           <div class="mt-4" dangerouslySetInnerHTML=${{ __html: reportBodyHtml(r) }}></div>
         </div>
       </aside>
@@ -117,7 +135,7 @@ const SEL = 'bg-ink border border-edge rounded-lg px-2.5 py-1.5 text-[13px] text
 
 export function Reports() {
   const s = useStore();
-  const [open, setOpen] = useState(null);
+  const [open, setOpen] = useState(null);   // holds an ID; the object goes stale the moment a record folds
   const all = s.reports.items || [];
 
   /* Same default as Feedback: your shelf, not the whole estate's. The sidebar badge counts the same
@@ -149,15 +167,13 @@ export function Reports() {
   const filtered = fPerson !== s.user || fAgent !== 'all' || unreadOnly || !!rSearch;
   const resetFilters = () => { setRSearch(''); setFPerson(s.user); setFAgent('all'); setUnreadOnly(false); };
   const btn = 'px-3 py-1.5 rounded-lg text-[12px] border border-edge text-slate-300 hover:text-white hover:bg-panel2';
+  const openReport = open ? all.find(r => r.id === open) || null : null;
 
   async function markRead(r) {
-    const cur = getState().reports;
-    const idx = (cur.items || []).findIndex(x => x.id === r.id);
-    if (idx < 0) return;
-    const items2 = cur.items.slice();
-    items2[idx] = { ...items2[idx], read: true, read_by: currentUser(), read_at: new Date().toISOString() };
-    try { await aPut('reports.json', { ...cur, items: items2, updated: new Date().toISOString() }); setOpen(null); }
-    catch (e) { banner('err', "Couldn't mark read. " + esc(e.message)); }
+    try {
+      await postReportRecord({ report_id: r.id, kind: 'read', by: currentUser() });
+      banner('ok', `Acknowledged — <b>${esc(r.title || r.id)}</b>.`);
+    } catch (e) { banner('err', "Couldn't acknowledge. " + esc(e.message)); }
   }
 
   return html`
@@ -185,12 +201,12 @@ export function Reports() {
             <span></span><span class="justify-self-center">Agent</span><span class="justify-self-center">For</span><span>Source</span><span>Report</span><span>Date</span><span>Type</span><span></span>
           </div>
           <div class="divide-y divide-edge/60">
-            ${items.map(r => html`<${Row} key=${r.id} r=${r} onOpen=${setOpen}/>`)}
+            ${items.map(r => html`<${Row} key=${r.id} r=${r} onOpen=${() => setOpen(r.id)}/>`)}
           </div>
         </div>` : html`
         <div class="rounded-xl border border-edge bg-panel p-10 text-center text-slate-400">${all.length
           ? html`Nothing matches these filters. <button class="text-accent hover:underline" onClick=${resetFilters}>Clear them</button> to see all ${all.length}.`
           : html`No reports yet. Agents post MD/HTML reports here (replacing email/Slack).`}</div>`}
-      <${Drawer} r=${open} onClose=${() => setOpen(null)} onRead=${markRead}/>
+      <${Drawer} r=${openReport} onClose=${() => setOpen(null)} onRead=${markRead}/>
     </div>`;
 }
