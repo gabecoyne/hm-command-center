@@ -384,9 +384,102 @@ function PriceCard({ t }) {
     </div>`;
 }
 
+// ── shipping-threshold test ──────────────────────────────────────────────────
+// A shipping change is store-wide: no SKU, no attach rate. Its card measures
+// order-band migration, average order value and shipping collected per order
+// against a locked baseline. Blended conversion rate and abandoned checkouts are
+// judged by hm-price-test-watch (Triple Whale lives outside this feeder).
+function ShippingCard({ t }) {
+  const [open, setOpen] = useState(false);
+  const g = t.gates || {};
+  const b = t.baseline || {};
+  const o = t.observed || {};
+  const dl = t.delta || {};
+  const [label, cls] = PSTATE[t.state] || PSTATE.collecting;
+  const muted = g.callable ? 'text-white' : 'text-slate-500';
+
+  const ask = mkAsk(
+    'shipping threshold test ' + t.test_id,
+    `${t.label}. Changed ${t.changed_at}, measuring from ${t.measure_from}. State ${t.state}. ` +
+    `${g.orders_collected} of ${g.min_orders_to_call} store orders, p=${g.p_value} on mid-band share. ` +
+    `Band mix baseline ${b.band_share_under_99}/${b.band_share_99_to_169}/${b.band_share_169_plus} ` +
+    `vs observed ${o.band_share_under_99}/${o.band_share_99_to_169}/${o.band_share_169_plus}. ` +
+    `AOV ${o.aov_total} vs ${b.aov_total}. Shipping collected per order ${o.ship_per_order} vs ${b.ship_per_order}. ` +
+    (t.closeout_decision ? `Pending decision at closeout: ${t.closeout_decision.question} ` : '') +
+    (t.confounders || []).map(c => `Confounder: ${c.summary}`).join(' ')
+  );
+
+  const row = (k, base, obs, delta) => html`
+    <tr class="border-b border-edge/60 last:border-0">
+      <td class="py-2 text-slate-400">${k}</td>
+      <td class="text-right py-2 font-mono text-slate-400">${base}</td>
+      <td class="text-right py-2 font-mono text-slate-200">${obs}</td>
+      <td class="text-right py-2 font-mono ${muted}">${delta}</td>
+    </tr>`;
+
+  return html`
+    <div class="relative rounded-xl border border-edge bg-panel">
+      <${AskButton} prompt=${ask}/>
+      <button onClick=${() => setOpen(!open)} class="w-full text-left p-4 pr-10">
+        <div class="flex items-start gap-3 flex-wrap">
+          <span class="text-[11px] px-2 py-0.5 rounded-full border ${cls}">${label}</span>
+          <div class="min-w-0 flex-1">
+            <div class="text-white text-[15px] font-medium">${t.label}</div>
+            <div class="mt-0.5 text-[12px] text-slate-400">
+              changed ${t.changed_at} · store-wide · decision due ${t.expires_at || '—'}
+            </div>
+          </div>
+          <div class="text-right shrink-0">
+            <div class="text-[13px] text-slate-200">${t.headline}</div>
+            <div class="text-[11px] font-mono text-slate-500">
+              ${g.orders_per_day ? `${g.orders_per_day}/day · ` : ''}${t.window_days}d in
+            </div>
+          </div>
+          <span class="text-slate-500 text-xs">${open ? '▾' : '▸'}</span>
+        </div>
+        <div class="mt-3">
+          <${ProgressBar} frac=${g.progress} callable=${g.callable}/>
+          <div class="mt-1 flex justify-between text-[11px] font-mono text-slate-500">
+            <span>${num(g.orders_collected)} / ${num(g.min_orders_to_call)} store orders</span>
+            <span>${g.callable ? 'both gates open' : (g.sample_met ? `sample met · p=${p_(g.p_value)}` : 'sample gate closed')}</span>
+          </div>
+        </div>
+      </button>
+
+      ${open ? html`
+        <div class="border-t border-edge p-4 space-y-3">
+          <div class="overflow-x-auto">
+            <table class="w-full text-[13px]">
+              <thead>
+                <tr class="text-[10px] uppercase tracking-widest text-slate-500 border-b border-edge">
+                  <th class="text-left py-2 font-normal">Metric</th>
+                  <th class="text-right py-2 font-normal">Baseline</th>
+                  <th class="text-right py-2 font-normal">Since ${t.measure_from}</th>
+                  <th class="text-right py-2 font-normal">${g.callable ? 'Delta' : 'Delta (not callable)'}</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${row('Store orders under $99', pct(b.band_share_under_99, 1), pct(o.band_share_under_99, 1), sgn(dl.band_share_under_99))}
+                ${row('Store orders $99–$168.99 (lost free shipping)', pct(b.band_share_99_to_169, 1), pct(o.band_share_99_to_169, 1), sgn(dl.band_share_99_to_169))}
+                ${row('Store orders $169 and up (free shipping)', pct(b.band_share_169_plus, 1), pct(o.band_share_169_plus, 1), sgn(dl.band_share_169_plus))}
+                ${row('Average order value', money(b.aov_total), money(o.aov_total), dmoney(dl.aov_abs))}
+                ${row('Shipping collected per order', money(b.ship_per_order), money(o.ship_per_order), dmoney(dl.ship_per_order_abs))}
+              </tbody>
+            </table>
+          </div>
+          ${t.closeout_decision ? html`
+            <div class="rounded-lg border border-sky-400/25 bg-sky-400/10 px-3 py-2.5 text-[12.5px] text-sky-100">
+              <span class="text-[10px] uppercase tracking-widest text-sky-300 block mb-1">Decision pending at closeout ${t.expires_at}</span>
+              ${t.closeout_decision.question}
+            </div>` : null}
+        </div>` : null}
+    </div>`;
+}
+
 function PriceTests({ d }) {
   if (!d) return null;
   const tests = d.tests || [];
+  const shipping = d.shipping_tests || [];
   const gen = d.generated ? new Date(d.generated).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
 
   return html`
@@ -398,11 +491,12 @@ function PriceTests({ d }) {
             Pre/post, measured on attach per 1,000 orders — not randomised, not comparable to the A/B register above.
           </div>
         </div>
-        <div class="text-[11px] font-mono text-slate-500">${tests.length} active · updated ${gen} CT</div>
+        <div class="text-[11px] font-mono text-slate-500">${tests.length + shipping.length} active · updated ${gen} CT</div>
       </div>
       <div class="p-3 space-y-2.5">
+        ${shipping.map(t => html`<${ShippingCard} t=${t} key=${t.test_id}/>`)}
         ${tests.map(t => html`<${PriceCard} t=${t} key=${t.test_id}/>`)}
-        ${!tests.length ? html`
+        ${!tests.length && !shipping.length ? html`
           <div class="p-6 text-center text-slate-400 text-[13px]">
             No active price tests. Add one to <code class="font-mono text-slate-300">data/price_tests.json</code>.
           </div>` : null}
