@@ -13,8 +13,14 @@ export const OWNERS = ["gabe", "collin"];
 export const SEATS = ["paid_media","brand","ecommerce","lifecycle","marketing_analyst","ops_analyst",
   "market_intel","inventory","customer_service","systems","finance","integrator",
   "business_intelligence","ea"];
-export const TYPES = ["approval","failure","performance","risk"];
+export const TYPES = ["approval","recommendation","failure","performance","risk"];
 export const ALERT_TYPES = ["risk","failure","performance"];
+// approval + recommendation are the two DECISION types (Attention_Item_Contract.md §1): both carry
+// the same nested `approval` payload and the same decision enum; only the UI button labels differ
+// (Approve/Reject vs Green-light/Decline). Added 2026-08-19 — the enum had never been widened after
+// contract v5 introduced `recommendation` on 2026-08-11, so every recommendation 400'd on push and
+// four strategic green-lights sat unseen on Drive.
+export const DECISION_TYPES = ["approval","recommendation"];
 export const SEVERITIES = ["urgent","high","normal"];
 // "dismissed" (2026-08-17) is a HUMAN terminal state: cleared from the queue without recording
 // an approve/reject or an acknowledgement. It exists so bulk-clearing 100+ stale items does not
@@ -131,7 +137,7 @@ function enforceShortTitle(item) {
   if (title.length <= TITLE_MAX_APPEND) return item;
   let cut = title.slice(0, TITLE_MAX_APPEND).replace(/\s+\S*$/, "").replace(/[ ,;:—-]+$/, "") || title.slice(0, TITLE_MAX_APPEND);
   const short = cut + "…";
-  if (item.type === "approval") {
+  if (DECISION_TYPES.includes(item.type)) {
     const ap = item.approval || (item.approval = {});
     ap.detail = title + (ap.detail ? "\n\n" + ap.detail : "");
   } else {
@@ -154,8 +160,8 @@ export function validateItem(item) {
   if (!STATUSES.includes(st)) throw new AttentionError(`status '${st}' not allowed`);
   if (!(item.title.length >= 3 && item.title.length <= TITLE_MAX_FOLD)) throw new AttentionError(`title must be 3..${TITLE_MAX_FOLD} chars`);
   const ap = item.approval;
-  if (item.type === "approval") {
-    if (typeof ap !== "object" || ap === null) throw new AttentionError("type 'approval' requires an `approval` object");
+  if (DECISION_TYPES.includes(item.type)) {
+    if (typeof ap !== "object" || ap === null) throw new AttentionError(`type '${item.type}' requires an \`approval\` object`);
     if (!(ap.proposal || ap.question)) throw new AttentionError("approval.proposal or approval.question is required");
     const bad = Object.keys(ap).filter((k) => !APPROVAL_FIELDS.includes(k));
     if (bad.length) throw new AttentionError(`unknown approval field(s): ${bad.sort().join(", ")}`);
