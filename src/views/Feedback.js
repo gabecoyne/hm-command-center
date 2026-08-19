@@ -5,7 +5,7 @@ import { html } from '../html.js';
 import { useState, useEffect, useMemo, useRef } from 'preact/hooks';
 import { useStore, getState, currentUser } from '../state.js';
 import { postDecision, postBulkDecision } from '../data.js';
-import { esc, cap, mdToHtml, nowCT, schWhen } from '../lib/format.js';
+import { esc, cap, mdToHtml, nowCT, schWhen, whenCT } from '../lib/format.js';
 import { userAv, EMB, TONE } from '../lib/avatars.js';
 import { isLive, isAlert, isDismissed } from '../lib/attention.js';
 import { banner } from '../components/Toasts.js';
@@ -38,7 +38,7 @@ const TYPE_RANK = { approval: 0, risk: 1, failure: 2, performance: 3 }, SEV_RANK
 const qSort = (a, b) => ((TYPE_RANK[a.type] ?? 9) - (TYPE_RANK[b.type] ?? 9)) || ((SEV_RANK[a.severity] ?? 9) - (SEV_RANK[b.severity] ?? 9)) || String(a.generated_at || '').localeCompare(String(b.generated_at || ''));
 /* Full-width layout. The Item column is the only flexible one — everything else is fixed, so the
    extra width all goes to the summary rather than being shared out into whitespace. */
-const QGRID = 'grid grid-cols-[20px_12px_200px_104px_minmax(0,1fr)_128px_52px_190px] gap-3 items-center';
+const QGRID = 'grid grid-cols-[20px_12px_200px_104px_minmax(0,1fr)_128px_136px_190px] gap-3 items-center';
 
 /* Age, not date, is what you act on: "these are all a week old, clear them" is the actual workflow.
    Compact unit ("6d" / "3w") with the real timestamp on hover, and it colours as it rots so a stale
@@ -108,7 +108,7 @@ const DEC_TONE = { approved: 'bg-emerald-500/15 text-emerald-300', rejected: 'bg
 const decisionOf = i => isDismissed(i) ? 'dismissed'
   : (isAlert(i) ? (i.ack_at ? 'acknowledged' : '') : ((i.approval || {}).decision || ''));
 const LOG_PAGE = 15;
-const LGRID = 'grid grid-cols-[120px_1.7fr_0.8fr_2.8fr_0.9fr_130px] gap-3 items-center';
+const LGRID = 'grid grid-cols-[120px_1.7fr_0.8fr_2.8fr_0.9fr_150px] gap-3 items-center';
 function logDecidedAt(it) { const ap = it.approval || {}; return it.dismissed_at || ap.decided_at || it.ack_at || it.resolved_at || (it.history && it.history.length ? it.history[it.history.length - 1].ts : '') || ''; }
 
 /* ---------- raw-HTML inner fragments for the rows (rendered via dangerouslySetInnerHTML) ---------- */
@@ -122,7 +122,7 @@ function cardInner(it) { const type = it.type || 'approval'; const tl = TL[type]
     <div class="min-w-0 py-0.5"><div class="text-[13px] text-white truncate">${esc(title)}</div>
       <div class="flex items-start gap-1.5 min-w-0 mt-0.5">${isAlert(it) ? '' : `<span class="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 mt-px ${am.cls}" title="${esc(am.line(m.name))}">${esc(am.pill)}</span>`}${preview ? `<span class="text-[11px] text-slate-400 leading-snug" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(preview)}</span>` : ''}</div></div>
     ${assigneeCell(it.owner)}
-    <span class="text-[11px] font-mono ${ageTone(ageDays(it))} justify-self-end whitespace-nowrap" title="filed ${esc(String(it.generated_at || '').replace('T', ' ').slice(0, 16))}">${esc(ageLabel(ageDays(it)))}</span>`; }
+    <span class="text-[11px] font-mono ${ageTone(ageDays(it))} justify-self-end whitespace-nowrap" title="filed ${esc(String(it.generated_at || '').replace('T', ' ').slice(0, 16))} CT${ageDays(it) == null ? '' : ' · ' + esc(ageLabel(ageDays(it))) + ' old'}">${esc(whenCT(it.generated_at))}</span>`; }
 function logRowInner(it) { const m = seatForSource(it.source); const type = it.type || 'approval'; const tl = TL[type] || type; const tc = TC[type] || 'bg-slate-700 text-slate-300'; const ap = it.approval || {};
   const st = decisionOf(it); const dl = DEC_LABELS[st] || st; const dt = DEC_TONE[st] || 'bg-slate-600/30 text-slate-300';
   const title = it.title || ''; const sub = ap.feedback || ''; const by = ap.decided_by || it.ack_by || ''; const when = logDecidedAt(it);
@@ -131,8 +131,8 @@ function logRowInner(it) { const m = seatForSource(it.source); const type = it.t
     <span class="font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded ${tc} justify-self-start whitespace-nowrap">${esc(tl)}</span>
     <div class="min-w-0"><div class="text-[13px] text-white truncate">${esc(title)}</div>${sub ? `<div class="text-[11px] text-slate-400 truncate">${esc(sub)}</div>` : ''}</div>
     ${by ? assigneeCell(by) : '<span class="text-[11px] text-slate-500">—</span>'}
-    <span class="text-[11px] font-mono text-slate-400 justify-self-end whitespace-nowrap" title="${esc(when)}">${esc(when ? String(when).slice(0, 10) : '—')}</span>`; }
-function historyHTML(it) { const h = (it.history || []); if (!h.length) return ''; return `<div class="text-[10px] uppercase tracking-widest text-slate-400 mb-2 mt-6">History</div><div class="space-y-2.5">${h.slice().reverse().map(e => `<div class="flex gap-2.5 text-[12px]"><span class="text-slate-500 font-mono shrink-0 w-[88px]">${esc(String(e.ts || '').slice(0, 10))}</span><div class="min-w-0"><span class="text-slate-200">${esc(e.by || '?')}</span> <span class="text-slate-400 lowercase">${esc(DEC_LABELS[e.action] || e.action || '')}</span>${e.note ? `<div class="text-slate-400 mt-0.5 whitespace-pre-wrap">${esc(e.note)}</div>` : ''}</div></div>`).join('')}</div>`; }
+    <span class="text-[11px] font-mono text-slate-400 justify-self-end whitespace-nowrap" title="${esc(when)}">${esc(when ? whenCT(when) : '—')}</span>`; }
+function historyHTML(it) { const h = (it.history || []); if (!h.length) return ''; return `<div class="text-[10px] uppercase tracking-widest text-slate-400 mb-2 mt-6">History</div><div class="space-y-2.5">${h.slice().reverse().map(e => `<div class="flex gap-2.5 text-[12px]"><span class="text-slate-500 font-mono shrink-0 w-[132px]" title="${esc(e.ts || '')}">${esc(whenCT(e.ts))}</span><div class="min-w-0"><span class="text-slate-200">${esc(e.by || '?')}</span> <span class="text-slate-400 lowercase">${esc(DEC_LABELS[e.action] || e.action || '')}</span>${e.note ? `<div class="text-slate-400 mt-0.5 whitespace-pre-wrap">${esc(e.note)}</div>` : ''}</div></div>`).join('')}</div>`; }
 /* An item's body can live in two places: `approval.detail` (decisions) or the TOP-LEVEL `detail`
    (alerts, which carry no approval object at all). The drawer only ever read the approval fields,
    so every alert's body — often the entire weekly digest — was silently dropped and the view then
@@ -161,7 +161,7 @@ function drawerBodyTop(it) { const type = it.type || 'approval'; const m = seatF
   const sec = (label, val) => val ? `<div class="text-[10px] uppercase tracking-widest text-slate-400 mb-1 mt-4">${label}</div><div class="md-body">${mdToHtml(val)}</div>` : '';
   const { body } = splitDetail(it);
   const anyBody = body || ap.what_i_found || ap.proposal || ap.detail || ap.expected_outcome || ap.question;
-  return `<div class="flex flex-wrap items-center gap-2 mb-1">${agentAv(m, 20)}<span class="text-[12px] text-white">${esc(m.name)}</span>${(m.director || m.manager) ? `<span class="text-[10px] text-slate-400">${[m.director, m.manager].filter(Boolean).map(esc).join(' ▸ ')}</span>` : ''}<span class="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded ${TC[type] || 'bg-slate-700 text-slate-300'}">${esc(TL[type] || type)}</span>${it.owner ? `<span class="${bd} inline-flex items-center gap-1">→ ${(String(it.owner).toLowerCase() === 'gabe' || String(it.owner).toLowerCase() === 'collin') ? userAv(String(it.owner).toLowerCase(), 16) : ''}${esc(it.owner)}</span>` : ''}${it.severity ? `<span class="${bd}">${esc(it.severity)}</span>` : ''}${it.seat ? `<span class="${bd}">${esc(String(it.seat).replace(/_/g, ' '))}</span>` : ''}<span class="text-[10px] font-mono text-slate-500">${esc(it.source || '')}</span>${it.generated_at ? `<span class="text-[11px] font-mono text-slate-400 ml-auto" title="${esc(it.generated_at)}">${esc(String(it.generated_at).slice(0, 10))}</span>` : ''}</div>
+  return `<div class="flex flex-wrap items-center gap-2 mb-1">${agentAv(m, 20)}<span class="text-[12px] text-white">${esc(m.name)}</span>${(m.director || m.manager) ? `<span class="text-[10px] text-slate-400">${[m.director, m.manager].filter(Boolean).map(esc).join(' ▸ ')}</span>` : ''}<span class="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded ${TC[type] || 'bg-slate-700 text-slate-300'}">${esc(TL[type] || type)}</span>${it.owner ? `<span class="${bd} inline-flex items-center gap-1">→ ${(String(it.owner).toLowerCase() === 'gabe' || String(it.owner).toLowerCase() === 'collin') ? userAv(String(it.owner).toLowerCase(), 16) : ''}${esc(it.owner)}</span>` : ''}${it.severity ? `<span class="${bd}">${esc(it.severity)}</span>` : ''}${it.seat ? `<span class="${bd}">${esc(String(it.seat).replace(/_/g, ' '))}</span>` : ''}<span class="text-[10px] font-mono text-slate-500">${esc(it.source || '')}</span>${it.generated_at ? `<span class="text-[11px] font-mono text-slate-400 ml-auto" title="filed ${esc(it.generated_at)}">${esc(whenCT(it.generated_at))}</span>` : ''}</div>
     ${isAlert(it) ? '' : (() => { const am = actorMeta(it); const a = actorOf(it);
       const tone = a === 'human' ? 'border-amber-400/40 bg-amber-500/10' : a === 'agent' ? 'border-emerald-500/30 bg-emerald-500/[.07]' : 'border-slate-600/50 bg-slate-700/20';
       return `<div class="mt-3 rounded-lg border ${tone} px-3 py-2 flex items-start gap-2">
@@ -379,7 +379,7 @@ function typeMatches(it, f) {
 /* Age buckets exist to support one specific move: "everything here is a week old — select all,
    archive." Filtering to the stale set first is what makes select-all safe to click. */
 const AGE_FILTERS = [['all', 'Any age'], ['3', 'Older than 3 days'], ['7', 'Older than a week'], ['14', 'Older than 2 weeks'], ['30', 'Older than a month']];
-const SORTS = [['priority', 'Sort: priority'], ['oldest', 'Sort: oldest first'], ['newest', 'Sort: newest first']];
+const SORTS = [['newest', 'Sort: newest first'], ['oldest', 'Sort: oldest first'], ['priority', 'Sort: priority']];
 const byAge = dir => (a, b) => dir * String(a.generated_at || '').localeCompare(String(b.generated_at || ''));
 const sortFor = k => k === 'oldest' ? byAge(1) : k === 'newest' ? byAge(-1) : qSort;
 
@@ -404,7 +404,7 @@ export function Feedback() {
   const [fAgent, setFAgent] = useState('all');
   const [fType, setFType] = useState('all');
   const [fAge, setFAge] = useState('all');
-  const [qSortKey, setQSortKey] = useState('priority');
+  const [qSortKey, setQSortKey] = useState('newest');
   const [sel, setSel] = useState(() => new Set());
   const [busy, setBusy] = useState(false);
   // switching Reviewing-as re-points the queue at that person's work
@@ -598,7 +598,7 @@ export function Feedback() {
           <div class="rounded-xl border border-edge bg-panel glow overflow-hidden">
             <div class="${QGRID} px-4 py-2 text-[10px] uppercase tracking-widest text-slate-400 border-b border-edge/60">
               <input type="checkbox" class="accent-accent h-3.5 w-3.5 cursor-pointer" checked=${allSel} aria-label="Select all shown" onChange=${toggleAll}/>
-              <span></span><span>Agent</span><span>Type</span><span>Item</span><span>For</span><span class="justify-self-end">Age</span><span class="justify-self-end">Action</span>
+              <span></span><span>Agent</span><span>Type</span><span>Item</span><span>For</span><span class="justify-self-end">When</span><span class="justify-self-end">Action</span>
             </div>
             <div class="divide-y divide-edge/60">
               ${items.map(it => html`<${QueueRow} key=${it.item_id} it=${it} onOpen=${setOpenId} selected=${sel.has(it.item_id)} onToggle=${toggle} onAck=${ack} onApprove=${approveInline} onDismiss=${dismiss}/>`)}
