@@ -373,8 +373,10 @@ function LpTable({ rows, benchmark, sources }) {
       title="Landing page performance"
       subtitle=${`GA4 revenue + traffic${gscOk ? ', GSC organic' : ''}${clOk ? ', Clarity friction' : ''}`}
       count=${`${rows.length} pages`}
-      meta=${`${num(totals.sessions)} sessions · ${money(totals.revenue)}` +
-             (bench.rpv != null ? ` · PDP benchmark ${money(bench.rpv)} RPV` : '')}
+      ${/* Header numbers use the same rounded form as the KPI cards above — a
+           raw $13345.60 next to $13,346 reads like two different figures. The
+           PDP benchmark stays out of here; it's on its own row once open. */''}
+      meta=${`${num(totals.sessions)} sessions · ${usd(totals.revenue)}`}
       defaultOpen=${false}>
       ${bench.rpv != null ? html`
         <div class="px-4 py-2 border-b border-edge text-[12px]">
