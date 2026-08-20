@@ -40,6 +40,174 @@ function Stat({ label, value, sub, tone }) {
     </div>`;
 }
 
+// ── Stage 1: the ad-side read ────────────────────────────────────────────────
+// Some tests are decided on delivery efficiency before they are decided on
+// revenue. The quadrant framing test is the first: four ad sets at $50/day each
+// buy roughly three purchases per arm — nowhere near enough to call a conversion
+// rate — but tens of thousands of impressions, which IS enough to call
+// add-to-carts per link click. So Stage 1 ranks on ATC/click and only the two
+// survivors get a revenue read.
+//
+// Every rate here divides by LINK clicks, never clicks-all. Comparing clicks-all
+// against link-driven sessions is what produced the "96% of clicks missing from
+// GA4" false alarm on 2026-08-19.
+function GateChip({ ok, label }) {
+  return html`
+    <span class="text-[10px] px-1.5 py-0.5 rounded border ${ok
+      ? 'bg-emerald-500/10 text-emerald-300 border-emerald-400/25'
+      : 'bg-white/5 text-slate-500 border-edge'}">${ok ? '✓' : '○'} ${label}</span>`;
+}
+
+function Stage1Panel({ t }) {
+  const arms = t.arms || [];
+  const rg = t.read_gates || {};
+  const base = (t.baselines || {}).atc_per_click;
+  const s1 = t.stage1_read || {};
+  const d = t.design || {};
+  const ro = t.readout || {};
+  const [showCreative, setShowCreative] = useState(false);
+  const anyCreative = arms.some(a => (a.creatives || []).length);
+
+  // Rank order comes from the feeder so the dashboard and the register can never
+  // disagree about who is winning.
+  const order = (s1.ranking || []).map(r => r.arm);
+  const rows = order.length
+    ? order.map(k => arms.find(a => a.arm === k)).filter(Boolean)
+        .concat(arms.filter(a => !order.includes(a.arm)))
+    : arms;
+
+  const need = a => {
+    if (a.disqualified) return ['below baseline — out', 'text-rose-300'];
+    if (a.gates_clear) return ['gates open', 'text-emerald-300'];
+    if (!a.impressions) return ['no delivery', 'text-slate-500'];
+    const miss = [];
+    if (a.gate_impressions === false) miss.push(`${num(rg.min_impressions - a.impressions)} impr`);
+    if (a.gate_link_clicks === false) miss.push(`${num(rg.min_link_clicks - a.link_clicks)} clicks`);
+    if (a.gate_frequency === false) miss.push('freq');
+    return ['needs ' + (miss.join(' · ') || 'more data'), 'text-slate-500'];
+  };
+
+  return html`
+    <div class="rounded-lg border border-sky-400/20 bg-sky-400/[0.04] p-3 space-y-3">
+      <div class="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <div class="text-[10px] uppercase tracking-widest text-sky-300">Stage 1 · ad-side read</div>
+          <div class="text-[12.5px] text-slate-300 mt-0.5">
+            Ranked on add-to-carts per link click${base ? `, against the ${(base * 100).toFixed(1)}% account baseline` : ''}.
+            CTR and CPC are context, never the verdict.
+          </div>
+        </div>
+        ${d.budget_per_adset_per_day ? html`
+          <div class="text-right text-[11px] font-mono text-slate-400 shrink-0">
+            ${money(d.budget_per_adset_per_day)}/day × ${d.arms} ad sets${d.cbo === false ? ' · no CBO' : ''}<br/>
+            ${d.creatives_per_adset} creatives each${ro.spend_to_date ? ` · ${money(ro.spend_to_date)} spent` : ''}
+          </div>` : null}
+      </div>
+
+      ${t.status === 'planned' && (t.launch_gates || []).length ? html`
+        <div class="rounded-lg border border-amber-400/25 bg-amber-400/[0.06] px-3 py-2.5 space-y-1.5">
+          <div class="text-[10px] uppercase tracking-widest text-amber-300">Not launched — these clear first</div>
+          ${t.launch_gates.map(g => html`
+            <div class="text-[12px] text-amber-100/90">
+              <span class="font-mono text-amber-300/80 mr-1.5">${g.id}</span>${g.gate}
+              <div class="text-[11.5px] text-amber-200/50 ml-6">${g.why}</div>
+            </div>`)}
+        </div>` : null}
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-[13px]">
+          <thead>
+            <tr class="text-[10px] uppercase tracking-widest text-slate-500 border-b border-edge">
+              <th class="text-left py-2 font-normal">Arm</th>
+              <th class="text-right py-2 font-normal">Spend</th>
+              <th class="text-right py-2 font-normal">Impr</th>
+              <th class="text-right py-2 font-normal">Link clicks</th>
+              <th class="text-right py-2 font-normal">CTR</th>
+              <th class="text-right py-2 font-normal">ATC / click</th>
+              <th class="text-right py-2 font-normal">$ / ATC</th>
+              <th class="text-right py-2 font-normal">Freq</th>
+              <th class="text-right py-2 font-normal">Gate</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((a, i) => {
+              const [gLabel, gCls] = need(a);
+              const beats = base != null && a.atc_per_click != null && a.atc_per_click >= base;
+              const lead = i === 0 && a.gates_clear && !a.disqualified;
+              return html`
+                <tr class="border-b border-edge/50 ${lead ? 'bg-white/[0.03]' : ''} ${a.disqualified ? 'opacity-60' : ''}">
+                  <td class="py-2">
+                    <span class="font-mono text-white">${a.arm}</span>
+                    ${a.quadrant ? html`<span class="ml-2 text-[11px] text-slate-400">${a.quadrant}</span>` : null}
+                    ${lead ? html`<span class="ml-2 text-[10px] text-emerald-300">leader</span>` : null}
+                    ${a.path ? html`<div class="text-[11px] font-mono text-slate-600">${a.path}</div>` : null}
+                  </td>
+                  <td class="text-right py-2 font-mono text-slate-300">${money(a.spend)}</td>
+                  <td class="text-right py-2 font-mono text-slate-300">${num(a.impressions)}</td>
+                  <td class="text-right py-2 font-mono text-slate-300">${num(a.link_clicks)}</td>
+                  <td class="text-right py-2 font-mono text-slate-400">${pct(a.ctr_link)}</td>
+                  <td class="text-right py-2 font-mono ${a.atc_per_click == null ? 'text-slate-500' : (beats ? 'text-emerald-300' : 'text-rose-300')}">${pct(a.atc_per_click, 1)}</td>
+                  <td class="text-right py-2 font-mono text-slate-300">${money(a.cost_per_atc)}</td>
+                  <td class="text-right py-2 font-mono text-slate-400">${a.frequency == null ? '—' : (+a.frequency).toFixed(2)}</td>
+                  <td class="text-right py-2 text-[11px] ${gCls}">${gLabel}</td>
+                </tr>`;
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      ${anyCreative ? html`
+        <div>
+          <button class="text-[11px] text-slate-400 hover:text-white" onClick=${() => setShowCreative(!showCreative)}>
+            ${showCreative ? '▾' : '▸'} By creative format
+          </button>
+          ${showCreative ? html`
+            <div class="mt-2 overflow-x-auto">
+              <table class="w-full text-[12.5px]">
+                <thead>
+                  <tr class="text-[10px] uppercase tracking-widest text-slate-500 border-b border-edge">
+                    <th class="text-left py-1.5 font-normal">Arm · format</th>
+                    <th class="text-right py-1.5 font-normal">Spend</th>
+                    <th class="text-right py-1.5 font-normal">Clicks</th>
+                    <th class="text-right py-1.5 font-normal">CTR</th>
+                    <th class="text-right py-1.5 font-normal">ATC / click</th>
+                    <th class="text-right py-1.5 font-normal">$ / ATC</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rows.flatMap(a => (a.creatives || []).map(c => html`
+                    <tr class="border-b border-edge/40">
+                      <td class="py-1.5"><span class="font-mono text-slate-300">${a.arm}</span>
+                        <span class="ml-2 text-slate-400">${c.format}</span></td>
+                      <td class="text-right py-1.5 font-mono text-slate-400">${money(c.spend)}</td>
+                      <td class="text-right py-1.5 font-mono text-slate-400">${num(c.link_clicks)}</td>
+                      <td class="text-right py-1.5 font-mono text-slate-400">${pct(c.ctr_link)}</td>
+                      <td class="text-right py-1.5 font-mono text-slate-300">${pct(c.atc_per_click, 1)}</td>
+                      <td class="text-right py-1.5 font-mono text-slate-400">${money(c.cost_per_atc)}</td>
+                    </tr>`))}
+                </tbody>
+              </table>
+              <div class="mt-1 text-[11px] text-slate-500">
+                Budget sits on the ad set, so Meta allocates between the two creatives inside an arm.
+                A weak format here is a creative problem, not a verdict on the framing.
+              </div>
+            </div>` : null}
+        </div>` : null}
+
+      <div class="flex flex-wrap gap-1.5">
+        <${GateChip} ok=${!!ro.stage1_callable} label="Stage 1 callable"/>
+        <${GateChip} ok=${ro.ga4_capture_ok !== false} label="GA4 capture ≥70%"/>
+        ${ro.review_on ? html`<span class="text-[10px] px-1.5 py-0.5 rounded border border-edge text-slate-400">
+          first review ${ro.review_on}${ro.days_live != null ? ` · day ${ro.days_live}` : ''}</span>` : null}
+        ${(s1.carry_forward || []).length ? html`<span class="text-[10px] px-1.5 py-0.5 rounded border border-emerald-400/25 bg-emerald-500/10 text-emerald-300">
+          carry forward: ${s1.carry_forward.join(' + ')}</span>` : null}
+      </div>
+
+      ${(t.decision_rule || {}).stage_1 ? html`
+        <div class="text-[12px] text-slate-400 border-l-2 border-sky-400/30 pl-3">${t.decision_rule.stage_1}</div>` : null}
+    </div>`;
+}
+
 // ── one running test ─────────────────────────────────────────────────────────
 function TestCard({ t }) {
   const [open, setOpen] = useState(t.state === 'significant');
@@ -50,7 +218,18 @@ function TestCard({ t }) {
     'CRO test ' + t.id,
     `${t.name}. Status ${t.status}, ${t.days_running == null ? 'start date unknown' : t.days_running + ' days running'}. ` +
     `Read: ${t.headline}. Hypothesis: ${t.hypothesis || 'n/a'}. Surface: ${t.surface || 'n/a'}. ` +
-    `Arms: ${arms.map(a => `${a.arm} n=${a.sessions} cvr=${a.cvr} rpv=${a.rpv}`).join(' | ')}.`
+    `Arms: ${arms.map(a => `${a.arm} n=${a.sessions} cvr=${a.cvr} rpv=${a.rpv}`).join(' | ')}.` +
+    // A Stage-1 test asked about on its RPV numbers alone invites the wrong
+    // answer — those arms are ranked on ad-side efficiency, not revenue.
+    (t.stage === 1
+      ? ` STAGE 1 — decided on add-to-carts per link click, not CVR/RPV. Baseline ` +
+        `${(t.baselines || {}).atc_per_click}. Ad side: ${arms.map(a =>
+          `${a.arm} spend=${a.spend} impr=${a.impressions} clicks=${a.link_clicks} ` +
+          `atc/click=${a.atc_per_click} $/atc=${a.cost_per_atc} gates=${a.gates_clear}` +
+          (a.disqualified ? ' DISQUALIFIED' : '')).join(' | ')}. ` +
+        `Carry forward: ${((t.stage1_read || {}).carry_forward || []).join(', ') || 'none yet'}. ` +
+        `Rule: ${(t.decision_rule || {}).stage_1 || ''}`
+      : '')
   );
 
   return html`
@@ -81,7 +260,14 @@ function TestCard({ t }) {
               <span class="text-[10px] uppercase tracking-widest text-slate-500 mr-2">Hypothesis</span>${t.hypothesis}
             </div>` : null}
 
-          ${arms.length ? html`
+          ${t.stage === 1 ? html`<${Stage1Panel} t=${t}/>` : null}
+
+          ${t.stage === 1 ? html`
+            <div class="text-[10px] uppercase tracking-widest text-slate-500 pt-1">
+              Stage 2 · revenue read — not the decision metric yet
+            </div>` : null}
+
+          ${(arms.length && (t.stage !== 1 || arms.some(a => a.sessions))) ? html`
             <div class="overflow-x-auto">
               <table class="w-full text-[13px]">
                 <thead>
@@ -120,10 +306,27 @@ function TestCard({ t }) {
               </table>
             </div>` : html`
             <div class="text-[13px] text-amber-200/80">
-              Registered in <span class="font-mono">cro_tests.json</span> but no arm data has been measured yet.
-              URL splits are read by <span class="font-mono">cro_lp_split_refresh.py</span>; theme tests need
-              <span class="font-mono">note_attributes</span> arm stamps to land.
+              ${t.stage === 1
+                ? 'No revenue data yet — Stage 2 opens once two arms clear the Stage 1 gates above.'
+                : html`Registered in <span class="font-mono">cro_tests.json</span> but no arm data has been measured yet.
+                  URL splits are read by <span class="font-mono">cro_lp_split_refresh.py</span>; theme tests need
+                  <span class="font-mono">note_attributes</span> arm stamps to land.`}
             </div>`}
+
+          ${(t.decision_rule || {}).stage_2 ? html`
+            <div class="text-[12px] text-slate-400 border-l-2 border-edge pl-3">
+              <span class="text-[10px] uppercase tracking-widest text-slate-500 block mb-0.5">How Stage 2 gets called</span>
+              ${t.decision_rule.stage_2}
+            </div>` : null}
+
+          ${/* The cart leak taxes every arm equally, so an arm can win the test and
+                still show a bad absolute ROAS. Without this on the card, the winning
+                framing gets killed for a problem the cart is causing. */''}
+          ${(t.decision_rule || {}).absolute_roas_caveat ? html`
+            <div class="text-[12px] text-amber-200/70 border-l-2 border-amber-400/30 pl-3">${t.decision_rule.absolute_roas_caveat}</div>` : null}
+
+          ${t.measurement_note ? html`
+            <div class="text-[11.5px] text-slate-500 border-l-2 border-edge/60 pl-3">${t.measurement_note}</div>` : null}
 
           ${t.recommendation ? html`
             <div class="text-[12px] text-slate-400 border-l-2 border-edge pl-3">${t.recommendation}</div>` : null}
