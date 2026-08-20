@@ -678,9 +678,20 @@ function ShippingCard({ t }) {
                 ${row('Store orders $169 and up (free shipping)', pct(b.band_share_169_plus, 1), pct(o.band_share_169_plus, 1), sgn(dl.band_share_169_plus))}
                 ${row('Average order value', money(b.aov_total), money(o.aov_total), dmoney(dl.aov_abs))}
                 ${row('Shipping collected per order', money(b.ship_per_order), money(o.ship_per_order), dmoney(dl.ship_per_order_abs))}
+                ${row('Express take rate', pct(b.express_take_rate, 1), pct(o.express_take_rate, 1), sgn(dl.express_take_rate_abs))}
+                ${row('Express fee collected (per express order)', money(b.express_fee_per_express_order), money(o.express_fee_per_express_order), '')}
+                ${row('Express $ across all orders', money(b.express_fee_per_all_orders), money(o.express_fee_per_all_orders), dmoney(dl.express_fee_per_all_orders_abs))}
               </tbody>
             </table>
           </div>
+          ${b.express_label_cost_per_order ? html`
+            <div class="rounded-lg border border-edge bg-black/20 px-3 py-2 text-[12px] text-slate-400">
+              <span class="text-slate-300">Reading express:</span> a falling take rate is the intended
+              outcome, not a loss. Express costs ${money(b.express_label_cost_per_order)}/order in labels;
+              at $16.99 HM recovered 19% of that. Buyers who stay now pay the full label, buyers who switch
+              to Standard cut HM's cost on that order by roughly two thirds. Judge this line on
+              <span class="text-slate-300">blended CVR</span>, not express volume.
+            </div>` : null}
           ${t.closeout_decision ? html`
             <div class="rounded-lg border border-sky-400/25 bg-sky-400/10 px-3 py-2.5 text-[12.5px] text-sky-100">
               <span class="text-[10px] uppercase tracking-widest text-sky-300 block mb-1">Decision pending at closeout ${t.expires_at}</span>
