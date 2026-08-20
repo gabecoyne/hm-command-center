@@ -11,6 +11,7 @@ import { useStore } from '../state.js';
 import { usd } from '../lib/format.js';
 import { mkAsk } from '../lib/prompts.js';
 import { AskButton } from '../components/AskButton.js';
+import { Section, Disclosure } from '../components/Section.js';
 
 // ── formatting ───────────────────────────────────────────────────────────────
 const pct = (n, d = 2) => (n == null || isNaN(+n)) ? '—' : (+n * 100).toFixed(d) + '%';
@@ -361,23 +362,27 @@ function LpTable({ rows, benchmark, sources }) {
 
   const bench = benchmark || {};
 
+  const totals = rows.reduce((a, r) => ({
+    sessions: a.sessions + (r.sessions || 0),
+    revenue: a.revenue + (r.revenue || 0),
+  }), { sessions: 0, revenue: 0 });
+
   return html`
-    <div class="rounded-xl border border-edge bg-panel overflow-hidden">
-      <div class="px-4 py-3 border-b border-edge flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <div class="text-white text-[15px] font-medium">Landing pages</div>
-          <div class="text-[12px] text-slate-400">
-            GA4 revenue + traffic${gscOk ? ', GSC organic' : ''}${clOk ? ', Clarity friction' : ''}
-          </div>
-        </div>
-        ${bench.rpv != null ? html`
-          <div class="text-right text-[12px]">
-            <span class="text-slate-500">PDP benchmark </span>
-            <span class="font-mono text-slate-300">${bench.path}</span>
-            <span class="ml-2 font-mono text-white">${money(bench.rpv)} RPV</span>
-            <span class="ml-2 font-mono text-slate-400">${pct(bench.cvr)} CVR</span>
-          </div>` : null}
-      </div>
+    <${Section}
+      id="cro_lps"
+      title="Landing page performance"
+      subtitle=${`GA4 revenue + traffic${gscOk ? ', GSC organic' : ''}${clOk ? ', Clarity friction' : ''}`}
+      count=${`${rows.length} pages`}
+      meta=${`${num(totals.sessions)} sessions · ${money(totals.revenue)}` +
+             (bench.rpv != null ? ` · PDP benchmark ${money(bench.rpv)} RPV` : '')}
+      defaultOpen=${false}>
+      ${bench.rpv != null ? html`
+        <div class="px-4 py-2 border-b border-edge text-[12px]">
+          <span class="text-slate-500">PDP benchmark </span>
+          <span class="font-mono text-slate-300">${bench.path}</span>
+          <span class="ml-2 font-mono text-white">${money(bench.rpv)} RPV</span>
+          <span class="ml-2 font-mono text-slate-400">${pct(bench.cvr)} CVR</span>
+        </div>` : null}
 
       <div class="overflow-x-auto">
         <table class="w-full text-[13px]">
@@ -428,7 +433,7 @@ function LpTable({ rows, benchmark, sources }) {
           </tbody>
         </table>
       </div>
-    </div>`;
+    </${Section}>`;
 }
 
 // ── price tests ──────────────────────────────────────────────────────────────
@@ -684,41 +689,71 @@ function ShippingCard({ t }) {
 }
 
 function PriceTests({ d }) {
-  if (!d) return null;
-  const tests = d.tests || [];
-  const shipping = d.shipping_tests || [];
-  const gen = d.generated ? new Date(d.generated).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
+  const tests = (d && d.tests) || [];
+  const shipping = (d && d.shipping_tests) || [];
+  const gen = (d && d.generated) ? new Date(d.generated).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
+  const breached = [...tests, ...shipping].filter(t => t.state === 'breached' || t.state === 'integrity').length;
 
   return html`
-    <div class="rounded-xl border border-edge bg-panel">
-      <div class="p-4 border-b border-edge flex items-baseline justify-between flex-wrap gap-2">
-        <div>
-          <div class="text-white text-[15px] font-medium">Price tests</div>
-          <div class="text-[12px] text-slate-400">
-            Pre/post, measured on attach per 1,000 orders — not randomised, not comparable to the A/B register above.
-          </div>
-        </div>
-        <div class="text-[11px] font-mono text-slate-500">${tests.length + shipping.length} active · updated ${gen} CT</div>
-      </div>
+    <${Section}
+      id="cro_price"
+      title="Price tests"
+      subtitle="Pre/post, measured on attach per 1,000 store orders — not randomised, not comparable to the A/B tests above"
+      count=${tests.length + shipping.length}
+      tone=${breached ? 'text-rose-300' : 'text-slate-400'}
+      meta=${d ? `${breached ? breached + ' breached · ' : ''}updated ${gen} CT` : 'no price snapshot'}
+      defaultOpen=${false}>
       <div class="p-3 space-y-2.5">
         ${shipping.map(t => html`<${ShippingCard} t=${t} key=${t.test_id}/>`)}
         ${tests.map(t => html`<${PriceCard} t=${t} key=${t.test_id}/>`)}
         ${!tests.length && !shipping.length ? html`
           <div class="p-6 text-center text-slate-400 text-[13px]">
-            No active price tests. Add one to <code class="font-mono text-slate-300">data/price_tests.json</code>.
+            ${d ? html`No active price tests. Add one to <code class="font-mono text-slate-300">data/price_tests.json</code>.`
+                : html`No price snapshot yet. Run <code class="font-mono text-slate-300">Scripts/build_price_snapshot.py</code>.`}
           </div>` : null}
-        ${Object.keys(d.errors || {}).length ? html`
+        ${Object.keys((d && d.errors) || {}).length ? html`
           <div class="rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-[12px] text-rose-200">
             ${Object.entries(d.errors).map(([k, v]) => `${k}: ${v}`).join(' · ')}
           </div>` : null}
       </div>
-    </div>`;
+    </${Section}>`;
+}
+
+// ── test sections ────────────────────────────────────────────────────────────
+// Tests are grouped by what they change, because the two families are not
+// comparable and stacking them in one list is what made this page unruly.
+// `category` is assigned by build_cro_snapshot.py (explicit in the register when
+// the feeder sets it, derived from session_mode/surface otherwise) — the view
+// never guesses.
+function TestSection({ id, title, subtitle, running, concluded, defaultOpen }) {
+  if (!running.length && !concluded.length) return null;
+  const sig = running.filter(t => t.state === 'significant').length;
+  const awaiting = running.filter(t => t.state === 'awaiting').length;
+
+  const meta = [
+    sig ? `${sig} ready to call` : null,
+    awaiting ? `${awaiting} awaiting data` : null,
+    concluded.length ? `${concluded.length} concluded` : null,
+  ].filter(Boolean).join(' · ') || (running.length ? 'collecting' : '—');
+
+  return html`
+    <${Section} id=${id} title=${title} subtitle=${subtitle}
+      count=${running.length ? `${running.length} running` : 'none running'}
+      tone=${sig ? 'text-emerald-300' : 'text-slate-400'}
+      meta=${meta} defaultOpen=${defaultOpen}>
+      <div class="p-3 space-y-2.5">
+        ${running.map(t => html`<${TestCard} t=${t} key=${t.id}/>`)}
+        ${concluded.length ? html`
+          <${Disclosure} label=${`Concluded (${concluded.length})`}>
+            ${concluded.map(t => html`<${TestCard} t=${t} key=${t.id}/>`)}
+          </${Disclosure}>` : null}
+      </div>
+    </${Section}>`;
 }
 
 // ── view ─────────────────────────────────────────────────────────────────────
 export function Cro() {
   const s = useStore();
-  const [tab, setTab] = useState('running');
   const d = s.cro;
 
   // The A/B snapshot being absent must not hide the price panel — they have
@@ -749,7 +784,13 @@ export function Cro() {
     `Running: ${running.map(t => `${t.id} — ${t.headline}`).join('; ')}. ` +
     `LPs: ${sum.lp_sessions} sessions, ${usd(sum.lp_revenue)} revenue across ${lps.length} pages.`);
 
-  const tabs = [['running', `Running (${running.length})`], ['concluded', `Concluded (${concluded.length})`]];
+  // One pass, two buckets. A test with an unknown category lands in on-site
+  // rather than vanishing — a section nobody can see is worse than a mis-filed row.
+  const inCat = (list, c) => list.filter(t => (t.category || 'onsite') === c);
+  const lpRunning = inCat(running, 'landing_page');
+  const lpConcluded = inCat(concluded, 'landing_page');
+  const siteRunning = running.filter(t => !lpRunning.includes(t));
+  const siteConcluded = concluded.filter(t => !lpConcluded.includes(t));
 
   return html`
     <div class="max-w-[1500px] space-y-5">
@@ -777,21 +818,24 @@ export function Cro() {
         <${Stat} label="LP revenue" value=${usd(sum.lp_revenue)} sub=${`${d.window_days}d, GA4 last-click`}/>
       </div>
 
-      <div class="flex gap-1.5">
-        ${tabs.map(([k, label]) => html`
-          <button onClick=${() => setTab(k)}
-            class="text-[13px] px-3 py-1.5 rounded-lg ${tab === k ? 'bg-panel2 text-white' : 'text-slate-400 hover:text-white hover:bg-panel2'}">
-            ${label}
-          </button>`)}
-      </div>
+      ${/* Landing page tests open by default — they are the live program. Everything
+            else remembers whatever you last set (Section persists per id). */''}
+      <${TestSection}
+        id="cro_lp_tests"
+        title="Landing page tests"
+        subtitle="Where paid traffic lands — tw_adid redirect splits and ad-to-LP message match arms"
+        running=${lpRunning} concluded=${lpConcluded} defaultOpen=${true}/>
 
-      <div class="space-y-2.5">
-        ${(tab === 'running' ? running : concluded).map(t => html`<${TestCard} t=${t} key=${t.id}/>`)}
-        ${!(tab === 'running' ? running : concluded).length ? html`
-          <div class="rounded-xl border border-edge bg-panel p-8 text-center text-slate-400">
-            No ${tab} tests.
-          </div>` : null}
-      </div>
+      <${TestSection}
+        id="cro_onsite_tests"
+        title="On-site tests"
+        subtitle="What the site does once they arrive — PDP, cart drawer, buy box. Arms stamped on the Shopify order."
+        running=${siteRunning} concluded=${siteConcluded} defaultOpen=${false}/>
+
+      ${!running.length && !concluded.length ? html`
+        <div class="rounded-xl border border-edge bg-panel p-8 text-center text-slate-400">
+          No tests registered in <code class="font-mono text-slate-300">data/cro_tests.json</code>.
+        </div>` : null}
 
       <${PriceTests} d=${s.price}/>
 
