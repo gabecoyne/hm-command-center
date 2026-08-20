@@ -676,7 +676,9 @@ function ShippingCard({ t }) {
                 ${row('Store orders under $99', pct(b.band_share_under_99, 1), pct(o.band_share_under_99, 1), sgn(dl.band_share_under_99))}
                 ${row('Store orders $99–$168.99 (lost free shipping)', pct(b.band_share_99_to_169, 1), pct(o.band_share_99_to_169, 1), sgn(dl.band_share_99_to_169))}
                 ${row('Store orders $169 and up (free shipping)', pct(b.band_share_169_plus, 1), pct(o.band_share_169_plus, 1), sgn(dl.band_share_169_plus))}
-                ${row('Average order value', money(b.aov_total), money(o.aov_total), dmoney(dl.aov_abs))}
+                ${row('Average order value (incl. shipping)', money(b.aov_total), money(o.aov_total), dmoney(dl.aov_abs))}
+                ${row('— of which is the new shipping fee', '—', '—', dmoney(dl.aov_mechanical))}
+                ${row('Merchandise AOV (real cart growth)', money(b.aov_merch), money(o.aov_merch), dmoney(dl.aov_merch_abs))}
                 ${row('Shipping collected per order', money(b.ship_per_order), money(o.ship_per_order), dmoney(dl.ship_per_order_abs))}
                 ${row('Express take rate', pct(b.express_take_rate, 1), pct(o.express_take_rate, 1), sgn(dl.express_take_rate_abs))}
                 ${row('Express fee collected (per express order)', money(b.express_fee_per_express_order), money(o.express_fee_per_express_order), '')}
@@ -684,6 +686,14 @@ function ShippingCard({ t }) {
               </tbody>
             </table>
           </div>
+          ${b.aov_merch ? html`
+            <div class="rounded-lg border border-edge bg-black/20 px-3 py-2 text-[12px] text-slate-400">
+              <span class="text-slate-300">Reading AOV:</span> the headline AOV includes the shipping line,
+              so a shipping-fee change lifts it mechanically without anyone buying more. The middle row
+              isolates that. <span class="text-slate-300">Merchandise AOV</span> is the only honest read of
+              threshold-seeking — buyers adding a Glass Baking Dish or bag to clear $169. Call migration on
+              that row, not the headline.
+            </div>` : null}
           ${b.express_label_cost_per_order ? html`
             <div class="rounded-lg border border-edge bg-black/20 px-3 py-2 text-[12px] text-slate-400">
               <span class="text-slate-300">Reading express:</span> a falling take rate is the intended
