@@ -196,7 +196,11 @@ function Stage1Panel({ t }) {
 
       <div class="flex flex-wrap gap-1.5">
         <${GateChip} ok=${!!ro.stage1_callable} label="Stage 1 callable"/>
-        <${GateChip} ok=${ro.ga4_capture_ok !== false} label="GA4 capture ≥70%"/>
+        ${/* A green tick on a check that hasn't run yet is worse than no chip —
+             with zero link clicks "capture ≥70%" is vacuously true. */''}
+        ${arms.some(a => a.link_clicks)
+          ? html`<${GateChip} ok=${ro.ga4_capture_ok !== false} label="GA4 capture ≥70%"/>`
+          : html`<span class="text-[10px] px-1.5 py-0.5 rounded border border-edge text-slate-500">GA4 capture — nothing to check yet</span>`}
         ${ro.review_on ? html`<span class="text-[10px] px-1.5 py-0.5 rounded border border-edge text-slate-400">
           first review ${ro.review_on}${ro.days_live != null ? ` · day ${ro.days_live}` : ''}</span>` : null}
         ${(s1.carry_forward || []).length ? html`<span class="text-[10px] px-1.5 py-0.5 rounded border border-emerald-400/25 bg-emerald-500/10 text-emerald-300">
