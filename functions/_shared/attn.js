@@ -45,6 +45,35 @@ export const HUMAN_APPROVAL_FIELDS = ["decision","feedback","decided_by","decide
    because at that length the producer isn't writing a title at all. */
 const TITLE_MAX_APPEND = 80, TITLE_MAX_FOLD = 120;
 
+/* Summary caps (Gabe 2026-08-28). Everything the card shows above the fold — the description and
+   each section of the decision payload — is 1–2 sentences. The queue had become a stack of
+   multi-paragraph reports, so the only usable way to work it was to skip to the proposal and
+   decide; the rest of the card was dead weight. Over the cap we trim at a sentence boundary and
+   park the full text in `detail_full`, which the Feedback view renders behind "Full detail ▸".
+   Mirrors Scripts/hm_attention.py — never blocking, nothing lost. */
+const SUMMARY_MAX = 300;
+const SUMMARY_FIELDS = ["what_i_found", "proposal", "expected_outcome"];
+function trimToSummary(text, limit = SUMMARY_MAX) {
+  const t = String(text || "").trim();
+  if (t.length <= limit) return [t, ""];
+  const w = t.slice(0, limit + 1);
+  const end = Math.max(w.lastIndexOf(". "), w.lastIndexOf(".\n"), w.lastIndexOf("! "), w.lastIndexOf("? "));
+  if (end >= Math.floor(limit * 0.4)) return [t.slice(0, end + 1).trim(), t.slice(end + 1).trim()];
+  const cut = w.slice(0, limit).replace(/\s+\S*$/, "").replace(/[ ,;:—-]+$/, "") || t.slice(0, limit);
+  return [cut + "…", t.slice(cut.length).trim()];
+}
+function enforceShortSummary(item) {
+  const overflow = [];
+  const take = (label, value) => { const [head, tail] = trimToSummary(value);
+    if (tail) overflow.push(`**${label}**\n\n${String(value).trim()}`); return head; };
+  if (item.detail) item.detail = take("Description", item.detail);
+  const ap = item.approval;
+  if (ap && typeof ap === "object") for (const k of SUMMARY_FIELDS)
+    if (ap[k]) ap[k] = take(k.replace(/_/g, " ").replace(/^./, c => c.toUpperCase()), ap[k]);
+  if (overflow.length) item.detail_full = [item.detail_full, ...overflow].filter(Boolean).join("\n\n");
+  return item;
+}
+
 /* WHO DID THIS. A human request arrives with a Cloudflare Access-verified email header; a client
    -supplied `by` is only a claim. Trusting the claim meant the browser could stamp a decision with
    the other person's name — the decision log is an audit trail, so it has to record who was
@@ -178,6 +207,8 @@ export function validateItem(item) {
   if (item.resolves_by === undefined) item.resolves_by = null;
   if (item.dedup_key === undefined) item.dedup_key = null;
   if (item.detail === undefined) item.detail = null;
+  if (item.detail_full === undefined) item.detail_full = null;
+  enforceShortSummary(item);   // §2: 1–2 sentences per section, overflow behind "Full detail"
   if (!item.thread) item.thread = [];
   return item;
 }

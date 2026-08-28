@@ -157,10 +157,46 @@ function splitDetail(it) {
 // The heading a human should read: the untruncated title when we have it.
 const fullTitleOf = it => (splitDetail(it).fullTitle || (it && it.title) || 'Item');
 
+/* The card is a decision surface, not a report (Gabe 2026-08-28). Producers are now held to
+   1–2 sentences per section at file time (hm_attention.py / attn.js), but the queue is full of
+   items filed under the old rules, so the view clips too: anything over the cap is cut at a
+   sentence boundary and its remainder moves into the "Full detail" disclosure with the rest of
+   the long-form body. Same text, one click down, instead of four stacked walls above the fold. */
+const SUMMARY_MAX = 300;
+function clipSummary(text) {
+  const t = String(text || '').trim();
+  if (t.length <= SUMMARY_MAX) return [t, ''];
+  const w = t.slice(0, SUMMARY_MAX + 1);
+  const end = Math.max(w.lastIndexOf('. '), w.lastIndexOf('.\n'), w.lastIndexOf('! '), w.lastIndexOf('? '));
+  if (end >= Math.floor(SUMMARY_MAX * 0.4)) return [t.slice(0, end + 1).trim(), t.slice(end + 1).trim()];
+  const cut = w.slice(0, SUMMARY_MAX).replace(/\s+\S*$/, '').replace(/[ ,;:—-]+$/, '') || t.slice(0, SUMMARY_MAX);
+  return [cut + '…', t.slice(cut.length).trim()];
+}
+/* The disclosure. Native <details> so it costs no state and survives the raw-HTML render path. */
+function fullDetailBlock(parts) {
+  const body = parts.filter(Boolean).join('\n\n');
+  if (!body.trim()) return '';
+  return `<details class="mt-4 rounded-lg border border-edge bg-white/[.02]">
+    <summary class="cursor-pointer select-none px-3 py-2 text-[11px] uppercase tracking-widest text-slate-300 hover:text-white marker:text-slate-500">Full detail</summary>
+    <div class="md-body px-3 pb-3 pt-1 border-t border-edge">${mdToHtml(body)}</div></details>`;
+}
+
 function drawerBodyTop(it) { const type = it.type || 'approval'; const m = seatForSource(it.source); const ap = it.approval || {}; const bd = 'font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-white/5 text-slate-400';
   const sec = (label, val) => val ? `<div class="text-[10px] uppercase tracking-widest text-slate-400 mb-1 mt-4">${label}</div><div class="md-body">${mdToHtml(val)}</div>` : '';
   const { body } = splitDetail(it);
   const anyBody = body || ap.what_i_found || ap.proposal || ap.detail || ap.expected_outcome || ap.question;
+  /* Above the fold: at most a couple of sentences per section. The tail of anything longer, plus
+     the long-form plan (approval.detail) and detail_full, all go behind one "Full detail" toggle. */
+  const more = [];
+  const secShort = (label, val) => { if (!val) return '';
+    const [head, tail] = clipSummary(val); if (tail) more.push('**' + label + '**\n\n' + String(val).trim());
+    return sec(label, head); };
+  const secs = [
+    secShort(isAlert(it) ? 'What the agent found' : 'Description', body),
+    secShort('What the agent found', ap.what_i_found),
+    secShort('Proposal', ap.proposal),
+    secShort('Expected outcome', ap.expected_outcome),
+  ].join('');
   return `<div class="flex flex-wrap items-center gap-2 mb-1">${agentAv(m, 20)}<span class="text-[12px] text-white">${esc(m.name)}</span>${(m.director || m.manager) ? `<span class="text-[10px] text-slate-400">${[m.director, m.manager].filter(Boolean).map(esc).join(' ▸ ')}</span>` : ''}<span class="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded ${TC[type] || 'bg-slate-700 text-slate-300'}">${esc(TL[type] || type)}</span>${it.owner ? `<span class="${bd} inline-flex items-center gap-1">→ ${(String(it.owner).toLowerCase() === 'gabe' || String(it.owner).toLowerCase() === 'collin') ? userAv(String(it.owner).toLowerCase(), 16) : ''}${esc(it.owner)}</span>` : ''}${it.severity ? `<span class="${bd}">${esc(it.severity)}</span>` : ''}${it.seat ? `<span class="${bd}">${esc(String(it.seat).replace(/_/g, ' '))}</span>` : ''}<span class="text-[10px] font-mono text-slate-500">${esc(it.source || '')}</span>${it.generated_at ? `<span class="text-[11px] font-mono text-slate-400 ml-auto" title="filed ${esc(it.generated_at)}">${esc(whenCT(it.generated_at))}</span>` : ''}</div>
     ${isAlert(it) ? '' : (() => { const am = actorMeta(it); const a = actorOf(it);
       const tone = a === 'human' ? 'border-amber-400/40 bg-amber-500/10' : a === 'agent' ? 'border-emerald-500/30 bg-emerald-500/[.07]' : 'border-slate-600/50 bg-slate-700/20';
@@ -169,11 +205,8 @@ function drawerBodyTop(it) { const type = it.type || 'approval'; const m = seatF
         <span class="text-[12px] text-slate-200 leading-snug">${esc(am.line(m.name))}</span></div>`; })()}
     ${it.resolves_by ? `<p class="text-[11px] font-mono text-amber-300 mt-2">Resolves by ${esc(String(it.resolves_by).slice(0, 10))}</p>` : ''}
     ${ap.question ? `<p class="text-sm text-white mt-3">${esc(ap.question)}</p>` : ''}
-    ${sec(isAlert(it) ? 'What the agent found' : 'Description', body)}
-    ${sec('What the agent found', ap.what_i_found)}
-    ${sec('Proposal', ap.proposal)}
-    ${sec('Detail', ap.detail)}
-    ${sec('Expected outcome', ap.expected_outcome)}
+    ${secs}
+    ${fullDetailBlock([...more, ap.detail, it.detail_full])}
     ${anyBody ? '' : `<p class="text-sm text-slate-400 mt-3">${isAlert(it) ? 'Heads-up only, and the agent attached nothing beyond the headline. Acknowledge to clear it.' : 'No extra detail was attached to this item.'}</p>`}`; }
 
 /* ---------- components ---------- */
