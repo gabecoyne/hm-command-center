@@ -10,7 +10,7 @@ const state = {
   dash: null, inv: null,
   reports: { items: [] },
   analysis: { items: {} },
-  life: null, sched: null, model: null, cash: null,
+  life: null, sched: null, model: null, cash: null, pay: null,
   calib: { totals: {}, seats: [] },
   runs: { items: [] },
   cro: null,                               // data/cro_snapshot.json — build_cro_snapshot.py

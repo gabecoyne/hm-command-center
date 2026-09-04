@@ -136,14 +136,90 @@ function buildEmailSms(life, dash){
   return {cfg, ask};
 }
 
-// renderFinance (line 468)
-function buildFinance(cash){
-  const c=cash&&cash.data;
-  const cashNote=(cash&&cash.ok&&c&&c.as_of)?("as of "+c.as_of):((cash&&cash.error)?cash.error:"awaiting first cash sync");
-  let balancesHtml;
-  {const defs=(c&&c.line_defs)||[],byKey={};((c&&c.balances)||[]).forEach(b=>byKey[b.key]=b);
-    balancesHtml=defs.length?(defs.map(d=>{const b=byKey[d.key],amt=b?b.amount:null,isDebt=d.kind==='debt';return `<div class="flex items-center justify-between py-1.5 border-b border-edge/50 last:border-0"><span class="text-[12px] text-slate-300">${esc(d.label)}${isDebt?' <span class="text-[9px] text-slate-500 uppercase">debt</span>':''}</span><span class="font-mono text-[12px] ${amt==null?'text-slate-500':(isDebt?'text-rose-300':'text-slate-100')}">${amt==null?'—':(isDebt?'-'+usd(Math.abs(amt)):usd(amt))}</span></div>`;}).join("")+((c&&c.net!=null)?`<div class="flex items-center justify-between pt-2 mt-1"><span class="text-[12px] text-white font-medium">Net position</span><span class="font-mono text-[13px] ${c.net>=0?'text-emerald-300':'text-rose-300'}">${usd(c.net)}</span></div>`:`<div class="text-[11px] text-slate-500 mt-2">Awaiting first sync — net = cash (lines 1–3) minus financing (4–6).</div>`)):`<div class="text-slate-400 text-sm">No <code>cash.json</code> yet.</div>`;
+// renderFinance — cash & payables.
+//
+// Headline is NET CASH (what is in the accounts), not cash-minus-all-debt: most of the debt is not
+// due imminently, so subtracting it up front answers a question nobody is asking (Gabe, 2026-09-04).
+// The near-term question is "if we pay what is due soon, where does cash land" — that is the
+// payables card, fed by payables.json (Scripts/collect_payables.py).
+//
+// Three buckets are never summed into one number:
+//   committed  — contractual. An invoice exists or a supplier is owed it.
+//   unverified — believed open, nobody has confirmed. Shown, never folded into the committed total.
+//   deferrable — scheduled in the model but not yet placed. Can be held back without breaching.
+// Term debt (Shopify Capital) sits below the fold as a memo, not in the headline.
+
+const AS_OF_CLS = 'text-[9px] font-mono text-slate-500 tabular-nums';
+function staleDot(asOf, today){
+  if(!asOf) return '';
+  const d=Math.round((Date.parse(today+'T00:00:00')-Date.parse(asOf+'T00:00:00'))/86400000);
+  if(!(d>2)) return '';
+  return ` <span class="text-amber-400" title="${d} days stale">•</span>`;
+}
+
+function buildFinance(cash, pay){
+  const c=cash&&cash.data, p=(pay&&pay.data)||null;
+  const today=(p&&p.as_of)||new Date().toISOString().slice(0,10);
+
+  // --- section header note: the timestamp, always, even when the collector is blocked.
+  let cashNote;
+  {const bits=[];
+    if(p&&p.cash){
+      const oldest=p.cash.oldest_line_as_of, fresh=p.cash.fresh_as_of;
+      bits.push('balances '+(oldest===fresh||!fresh?('as of '+(oldest||'—')):(oldest+' → '+fresh)));
+    } else if(c&&c.as_of){ bits.push('balances as of '+c.as_of); }
+    if(pay&&pay.generated_at) bits.push('payables rebuilt '+String(pay.generated_at).slice(0,16).replace('T',' ')+' CT');
+    const blocked=(p&&p.cash&&(p.cash.blocked_lines||[]).length)||0;
+    if(blocked) bits.push(blocked+' bank line'+(blocked>1?'s':'')+' stale — QBO sign-in blocked'+((p.cash.consecutive_blocked_runs)?(' ('+p.cash.consecutive_blocked_runs+' runs)'):''));
+    cashNote=bits.length?bits.join(' · '):((cash&&cash.error)?cash.error:'awaiting first cash sync');
   }
+
+  // --- current balances: cash lines, net cash, then term debt as a memo.
+  let balancesHtml;
+  if(p&&p.cash&&(p.cash.lines||[]).length){
+    const L=p.cash.lines, row=(l)=>{
+      const neg=l.group!=='cash';
+      return `<div class="flex items-center justify-between py-1.5 border-b border-edge/50 last:border-0"><div class="min-w-0"><div class="text-[12px] text-slate-300 truncate">${esc(l.label)}</div><div class="${AS_OF_CLS}">${esc(l.as_of||'—')}${staleDot(l.as_of,today)}</div></div><span class="font-mono text-[12px] shrink-0 ${l.amount==null?'text-slate-500':(neg?'text-rose-300':'text-slate-100')}">${l.amount==null?'—':(neg?'-'+usd(Math.abs(l.amount)):usd(l.amount))}</span></div>`;
+    };
+    const cashLines=L.filter(l=>l.group==='cash'), term=L.filter(l=>l.group==='term_debt');
+    const nc=p.cash.net_cash;
+    balancesHtml=cashLines.map(row).join("")
+      +`<div class="flex items-center justify-between pt-2.5 mt-1 border-t border-edge"><span class="text-[12px] text-white font-medium">Net cash</span><span class="font-mono text-[15px] font-semibold ${nc>=0?'text-emerald-300':'text-rose-300'}">${nc==null?'—':usd(nc)}</span></div>`
+      +(term.length?`<div class="mt-3 pt-2 border-t border-edge/60"><div class="text-[9px] uppercase tracking-widest text-slate-500 mb-1">Term debt · not due soon</div>${term.map(row).join("")}<div class="flex items-center justify-between pt-1.5"><span class="text-[11px] text-slate-400">Net of all debt</span><span class="font-mono text-[11px] text-slate-400">${(nc!=null&&p.cash.term_debt!=null)?usd(nc-p.cash.term_debt):'—'}</span></div></div>`:'')
+      +(p.cash.net_cash_synced!=null&&p.cash.net_cash_synced!==nc?`<div class="text-[10px] text-slate-500 mt-2 leading-snug">Mixed freshness. Last all-lines-same-day sync was ${esc(p.cash.as_of||'—')} at ${usd(p.cash.net_cash_synced)} — that is the number the trend chart plots.</div>`:'');
+  } else {
+    balancesHtml=`<div class="text-slate-400 text-sm">No <code>payables.json</code> yet — run <code>Scripts/collect_payables.py</code>.</div>`;
+  }
+
+  // --- short-term payables: category rollup + the bottom line.
+  let payablesHtml;
+  if(p&&p.totals){
+    const t=p.totals, cats=p.by_category||[];
+    const catRow=x=>`<div class="flex items-center justify-between py-1.5 border-b border-edge/50 last:border-0"><div class="min-w-0"><div class="text-[12px] text-slate-300 truncate">${esc(x.label)}</div>${(x.unverified||x.deferrable)?`<div class="text-[10px] text-slate-500">${x.unverified?('+'+usd(x.unverified)+' unverified'):''}${(x.unverified&&x.deferrable)?' · ':''}${x.deferrable?('+'+usd(x.deferrable)+' deferrable'):''}</div>`:''}</div><span class="font-mono text-[12px] text-slate-100 shrink-0">${usd(x.committed)}</span></div>`;
+    const line=(label,val,cls,sub)=>`<div class="flex items-center justify-between ${sub?'pt-1':'pt-2.5 mt-1 border-t border-edge'}"><span class="${sub?'text-[11px] text-slate-400':'text-[12px] text-white font-medium'}">${esc(label)}</span><span class="font-mono ${sub?'text-[11px]':'text-[15px] font-semibold'} ${cls}">${val==null?'—':usd(val)}</span></div>`;
+    const tone=v=>v==null?'text-slate-400':(v>=0?'text-emerald-300':'text-rose-300');
+    payablesHtml=`<div class="flex items-baseline justify-between mb-2"><span class="text-xs text-slate-400">Short-term payables · next ${p.window_days} days</span><span class="font-mono text-[13px] text-rose-300">${usd(t.committed)}</span></div>`
+      +cats.map(catRow).join("")
+      +line('Cash after committed payables',t.cash_after_committed,tone(t.cash_after_committed))
+      +(t.unverified?line('…if the unverified '+usd(t.unverified)+' also clears',t.cash_after_committed_and_unverified,tone(t.cash_after_committed_and_unverified),true):'')
+      +(t.deferrable?line('…and the deferrable '+usd(t.deferrable)+' is placed',t.cash_after_everything,tone(t.cash_after_everything),true):'')
+      +(t.overdue?`<div class="text-[10px] text-amber-300/80 mt-2">${usd(t.overdue)} of this is already past its due date.</div>`:'')
+      +`<div class="text-[10px] text-slate-500 mt-2 leading-snug">Committed = an invoice exists or a supplier is owed it. Unverified = believed open, unconfirmed. Deferrable = scheduled, not yet placed.</div>`;
+  } else {
+    payablesHtml=`<div class="text-xs text-slate-400 mb-2">Short-term payables</div><div class="text-slate-400 text-sm">No <code>payables.json</code> yet.</div>`;
+  }
+
+  // --- itemized list, newest obligation first.
+  let itemsHtml;
+  {const items=((p&&p.items)||[]).filter(i=>i.in_window&&i.amount);
+    const chip=(txt,cls)=>`<span class="text-[9px] uppercase tracking-wide px-1 py-px rounded ${cls}">${esc(txt)}</span>`;
+    itemsHtml=`<div class="text-xs text-slate-400 mb-2">Every obligation in the window · ${items.length} item${items.length===1?'':'s'}</div>`
+      +(items.length?`<div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="text-[10px] uppercase tracking-widest text-slate-400 text-left"><th class="font-normal py-1 pr-3">Due</th><th class="font-normal pr-3">Vendor</th><th class="font-normal pr-3">What</th><th class="font-normal pr-3 text-right">Amount</th><th class="font-normal pr-3">Basis</th></tr></thead><tbody>${items.map(i=>`<tr class="border-t border-edge/60"><td class="py-1.5 pr-3 font-mono text-[11px] whitespace-nowrap ${i.overdue?'text-amber-300':'text-slate-300'}">${esc(i.due||'monthly')}${i.overdue?' ⚠':''}</td><td class="pr-3 text-[12px] text-slate-200">${esc(i.vendor||'—')}</td><td class="pr-3 text-[11px] text-slate-400">${esc(i.description===i.vendor?'':(i.description||''))}</td><td class="pr-3 font-mono text-[12px] text-slate-100 text-right whitespace-nowrap">${usd(i.amount)}</td><td class="pr-3 whitespace-nowrap space-x-1">${i.status==='unverified'?chip('unverified','bg-amber-500/15 text-amber-300'):''}${i.commitment==='deferrable'?chip('deferrable','bg-slate-500/20 text-slate-300'):''}${chip(i.confidence,'bg-white/5 text-slate-400')}</td></tr>`).join("")}</tbody></table></div>`
+        :`<div class="text-slate-400 text-sm">Nothing due in the window.</div>`)
+      +((p&&p.sources)?`<div class="text-[10px] text-slate-500 mt-3 leading-snug">Sources — freight <code>HM_Aeronet_Invoice_Register.md</code> · duties <code>HM_CBP_Statements_Log.md</code> · supplier POs <code>HM_Payables_Register.md</code> · booked A/P + revolving <code>cash.json</code> (QBO, includes Bill.com bills synced to QBO) · debt service <code>${esc(p.sources.debt_service||'—')}</code>. Actuals beat the model: where an invoice exists the model's forecast row is not added on top.</div>`:'')
+      +((p&&(p.warnings||[]).length)?`<div class="text-[10px] text-amber-300/70 mt-1">${p.warnings.map(esc).join(' · ')}</div>`:'');
+  }
+
   const hist=(c&&c.history)||[];
   const hasHist=hist.length>0;
   let cashtrendCfg=null;
@@ -151,12 +227,11 @@ function buildFinance(cash){
     {label:"Cash (net)",data:hist.map(h=>h.net),borderColor:'#34d399',backgroundColor:'rgba(52,211,153,.10)',fill:true,tension:.25,pointRadius:0},
     {label:"Payables",data:hist.map(h=>h.ap_total),borderColor:'#fb7185',tension:.25,pointRadius:0}]},options:gopt()};
   }
-  let payablesHtml;
-  {const items=(c&&c.ap_items)||[];
-    payablesHtml=`<div class="flex items-center justify-between mb-2"><span class="text-[11px] uppercase tracking-widest text-slate-400">Short-term payables</span>${(c&&c.ap_total!=null)?`<span class="font-mono text-[12px] text-rose-300">${usd(c.ap_total)}</span>`:''}</div>`+(items.length?items.map(it=>`<div class="flex items-center justify-between py-1.5 border-b border-edge/50 last:border-0"><div class="min-w-0"><div class="text-[12px] text-slate-200 truncate">${esc(it.vendor||it.name||'—')}</div><div class="text-[10px] text-slate-500">${esc(it.due_date||it.due||'')}${it.status?' · '+esc(it.status):''}</div></div><span class="font-mono text-[12px] text-slate-200 shrink-0">${usd(it.amount)}</span></div>`).join(""):`<div class="text-slate-400 text-sm">${(cash&&cash.ok)?'No open payables.':'Awaiting first cash sync — A/P from daily-finance’s QBO scan, moving to the BI collector.'}</div>`);
-  }
-  const ask=mkAsk("the cash & payables trend",hist.length?("Latest net "+usd(hist.at(-1).net)+", payables "+usd(hist.at(-1).ap_total)+" over "+hist.length+" days."):"No cash history yet — awaiting the daily cash collector.");
-  return {cashNote, balancesHtml, cashtrendCfg, payablesHtml, ask, hasHist};
+  const ask=mkAsk("cash & short-term payables",
+    (p&&p.totals)
+      ? ("Net cash "+usd(p.cash.net_cash)+" (balances as of "+(p.cash.oldest_line_as_of||'?')+"). Committed payables in the next "+p.window_days+"d "+usd(p.totals.committed)+" → cash after "+usd(p.totals.cash_after_committed)+". Unverified "+usd(p.totals.unverified)+", deferrable "+usd(p.totals.deferrable)+".")
+      : "No payables.json yet — run Scripts/collect_payables.py.");
+  return {cashNote, balancesHtml, cashtrendCfg, payablesHtml, itemsHtml, ask, hasHist};
 }
 
 // renderInv (line 488). Note: the monolith's #d-ship block is guarded and not in
@@ -230,7 +305,7 @@ function GraphDrawer({ gkey, analysis, onClose }){
 // --- the view ----------------------------------------------------------------
 export function Dashboard(props){
   const s = useStore();
-  const dash = s.dash, model = s.model, cash = s.cash, inv = s.inv, analysis = s.analysis, life = s.life;
+  const dash = s.dash, model = s.model, cash = s.cash, pay = s.pay, inv = s.inv, analysis = s.analysis, life = s.life;
   const [gkey, setGkey] = useState(null);
 
   // Build all section content; memoized on the state slices each one reads so a
@@ -240,7 +315,7 @@ export function Dashboard(props){
   const cashfcst = useMemo(()=>buildCashFcst(model), [model]);
   const channel  = useMemo(()=>buildChannel(dash), [dash]);
   const emailsms = useMemo(()=>buildEmailSms(life, dash), [life, dash]);
-  const finance  = useMemo(()=>buildFinance(cash), [cash]);
+  const finance  = useMemo(()=>buildFinance(cash, pay), [cash, pay]);
   const inventory= useMemo(()=>buildInv(inv), [inv]);
   const updated  = useMemo(()=>buildUpdated(dash, model, cash, inv), [dash, model, cash, inv]);
 
@@ -303,13 +378,16 @@ export function Dashboard(props){
         <div class="rounded-xl border border-edge bg-panel glow p-4"><div class="text-xs text-slate-400 mb-2">Current balances</div><div id="d-balances" dangerouslySetInnerHTML=${{ __html: finance.balancesHtml }}></div></div>
         <div class="rounded-xl border border-edge bg-panel glow p-4 lg:col-span-2 relative">
           <div class="absolute top-2 right-2 z-[2] flex items-center gap-1"><${AskButton} prompt=${finance.ask} class=${ICON_CLS}/></div>
-          <div class="text-xs text-slate-400 mb-2 pr-14">Cash (net) & payables · daily trend</div>
-          <${ChartCanvas} id="c-cashtrend" height=${120} config=${finance.cashtrendCfg}/>
-          <div id="cashtrend-empty" class="text-[12px] text-slate-500 mt-2" style=${{ display: finance.hasHist ? 'none' : '' }}>Only one snapshot so far (bootstrap) — the daily cash collector runs on-machine (Collin, QBO+Shopify) and will fill in this daily trend.</div>
+          <div id="d-payables" class="pr-14" dangerouslySetInnerHTML=${{ __html: finance.payablesHtml }}></div>
         </div>
       </div>
       <div class="grid gap-4 mt-4">
-        <div class="rounded-xl border border-edge bg-panel glow p-4"><div id="d-payables" dangerouslySetInnerHTML=${{ __html: finance.payablesHtml }}></div></div>
+        <div class="rounded-xl border border-edge bg-panel glow p-4"><div id="d-payitems" dangerouslySetInnerHTML=${{ __html: finance.itemsHtml }}></div></div>
+        <div class="rounded-xl border border-edge bg-panel glow p-4">
+          <div class="text-xs text-slate-400 mb-2">Cash (net of all debt) & booked A/P · daily trend</div>
+          <${ChartCanvas} id="c-cashtrend" height=${120} config=${finance.cashtrendCfg}/>
+          <div id="cashtrend-empty" class="text-[12px] text-slate-500 mt-2" style=${{ display: finance.hasHist ? 'none' : '' }}>Only one snapshot so far (bootstrap) — the daily cash collector runs on-machine (Collin, QBO+Shopify) and will fill in this daily trend.</div>
+        </div>
       </div>
 
       <div class="flex items-center gap-3 mt-7 mb-3"><h2 class="text-sm font-semibold text-white">Inventory & movement</h2><span class="text-[11px] text-slate-400" id="inv-note">${inventory.invNote}</span></div>
