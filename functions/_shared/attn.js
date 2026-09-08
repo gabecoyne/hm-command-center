@@ -223,3 +223,66 @@ export async function foldFromDB(DB) {
   const recs = (await DB.prepare("SELECT record_json FROM attention_decisions ORDER BY ts, id").all()).results.map((r) => JSON.parse(r.record_json));
   return foldState(items, recs);
 }
+
+/* ---- fold cache (2026-09-08) -------------------------------------------------
+   `foldFromDB` scans BOTH attention tables in full — ~900 rows at today's size — and the
+   dashboard polls /api/attention/state every 30s. Two open browser tabs is ~5.2M row reads a
+   day, which is how a queue of 339 items exhausted D1's 5M/day free-tier read limit twice on
+   2026-09-08 and took the whole Command Center dark. Nothing about that was a capacity problem:
+   the fold is a pure function of data that changes a few times an hour, and we were recomputing
+   it 2,880 times a day per viewer.
+
+   So: fold on WRITE, serve the stored result on READ. Reads drop from ~900 rows to 1 (a primary
+   key lookup), roughly a 900x reduction. Correctness rests on every mutation going through
+   item.js / decision.js / comment.js — each already folded before returning, so caching is free
+   there. If the cache row is missing (cold start, failed rebuild, or a write that bypassed the
+   API) we fall back to a live fold and repopulate, so a stale cache self-heals on the next write
+   and a missing one costs exactly one full fold. `?fresh=1` forces a live fold on demand. */
+const FOLD_CACHE_DDL =
+  "CREATE TABLE IF NOT EXISTS fold_cache(key TEXT PRIMARY KEY, json TEXT NOT NULL, updated_at TEXT)";
+
+export async function readFoldCache(DB, key) {
+  try {
+    const row = await DB.prepare("SELECT json FROM fold_cache WHERE key = ?").bind(key).first();
+    return row ? JSON.parse(row.json) : null;
+  } catch { return null; }   // table not created yet — caller falls back to a live fold
+}
+
+export async function writeFoldCache(DB, key, value) {
+  const put = () => DB.prepare(
+    "INSERT INTO fold_cache(key, json, updated_at) VALUES(?, ?, ?) " +
+    "ON CONFLICT(key) DO UPDATE SET json=excluded.json, updated_at=excluded.updated_at"
+  ).bind(key, JSON.stringify(value), nowChicagoISO()).run();
+  try { await put(); }
+  catch {
+    // First write on a fresh database: create the table, then retry once.
+    try { await DB.prepare(FOLD_CACHE_DDL).run(); await put(); } catch { /* cache is best-effort */ }
+  }
+  return value;
+}
+
+// Drop the cached fold so the next read recomputes. Used when a rebuild fails partway.
+export async function clearFoldCache(DB, key) {
+  try { await DB.prepare("DELETE FROM fold_cache WHERE key = ?").bind(key).run(); } catch { /* ignore */ }
+}
+
+export const ATTENTION_CACHE_KEY = "attention_state";
+
+// Write path: fold once, store it, return it. Same cost as the old foldFromDB plus one upsert.
+export async function foldAndCache(DB) {
+  try {
+    const state = await foldFromDB(DB);
+    await writeFoldCache(DB, ATTENTION_CACHE_KEY, state);
+    return state;
+  } catch (e) {
+    await clearFoldCache(DB, ATTENTION_CACHE_KEY);   // never serve a fold we could not complete
+    throw e;
+  }
+}
+
+// Read path: one indexed row on the hot path; a live fold only when the cache is cold.
+export async function foldCached(DB) {
+  const hit = await readFoldCache(DB, ATTENTION_CACHE_KEY);
+  if (hit) return hit;
+  return foldAndCache(DB);
+}

@@ -1,4 +1,4 @@
-import { json, insertRecord, foldFromDB, nowChicagoISO, actorFor } from "../../_shared/attn.js";
+import { json, insertRecord, foldAndCache, nowChicagoISO, actorFor } from "../../_shared/attn.js";
 export async function onRequestPost(ctx) {
   let b;
   try { b = (await ctx.request.json()) || {}; } catch (e) { return json({ error: "invalid JSON" }, 400); }
@@ -10,6 +10,6 @@ export async function onRequestPost(ctx) {
   if (!text) return json({ error: "comment text is required" }, 400);
   if (!["human", "agent"].includes(author_kind)) return json({ error: "author_kind must be human|agent" }, 400);
   const rec = { item_id, kind: "comment", by, ts: nowChicagoISO(), text, author_kind };
-  try { await insertRecord(ctx.env.DB, rec); return json(await foldFromDB(ctx.env.DB)); }
+  try { await insertRecord(ctx.env.DB, rec); return json(await foldAndCache(ctx.env.DB)); }
   catch (e) { return json({ error: `${e.name}: ${e.message}` }, 400); }
 }

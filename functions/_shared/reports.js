@@ -4,7 +4,8 @@
 // human puts INSIDE that blob — read state, a note — is gone on the next sync. So human actions are
 // append-only records in their own table and folded onto the reports at read time, exactly like the
 // attention queue. Nothing is stored folded.
-import { json, nowChicagoISO, normalizePerson } from "./attn.js";
+import { json, nowChicagoISO, normalizePerson,
+         readFoldCache, writeFoldCache, clearFoldCache } from "./attn.js";
 
 export const REPORT_RECORD_KINDS = ["read", "comment"];
 
@@ -48,6 +49,29 @@ export async function foldReportsFromDB(DB) {
   const recs = (await DB.prepare("SELECT record_json FROM report_records ORDER BY ts, id").all())
     .results.map((r) => JSON.parse(r.record_json));
   return foldReports(doc, recs);
+}
+
+/* Same fold-cache treatment as the attention queue (see _shared/attn.js) — this endpoint is the
+   other half of the 30s dashboard poll and scans report_records in full on every call. Note the
+   extra invalidation path: unlike attention, the base `reports.json` document is rewritten by the
+   dispatcher through /api/data, which never touches record.js — so that PUT clears this key. */
+export const REPORTS_CACHE_KEY = "reports_state";
+
+export async function foldReportsAndCache(DB) {
+  try {
+    const state = await foldReportsFromDB(DB);
+    await writeFoldCache(DB, REPORTS_CACHE_KEY, state);
+    return state;
+  } catch (e) {
+    await clearFoldCache(DB, REPORTS_CACHE_KEY);
+    throw e;
+  }
+}
+
+export async function foldReportsCached(DB) {
+  const hit = await readFoldCache(DB, REPORTS_CACHE_KEY);
+  if (hit) return hit;
+  return foldReportsAndCache(DB);
 }
 
 export async function insertReportRecord(DB, rec) {

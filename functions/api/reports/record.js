@@ -1,5 +1,5 @@
 import { json, nowChicagoISO, actorFor } from "../../_shared/attn.js";
-import { REPORT_RECORD_KINDS, insertReportRecord, foldReportsFromDB } from "../../_shared/reports.js";
+import { REPORT_RECORD_KINDS, insertReportRecord, foldReportsAndCache } from "../../_shared/reports.js";
 
 // One human action on a report: `read` (acknowledge) or `comment` (a note the producing agent reads
 // back on its next run). Accepts report_ids[] so marking a filtered page read is one write + one fold.
@@ -20,6 +20,6 @@ export async function onRequestPost(ctx) {
       if (kind === "comment") { rec.text = text; rec.author_kind = b.author_kind === "agent" ? "agent" : "human"; }
       await insertReportRecord(ctx.env.DB, rec);
     }
-    return json(await foldReportsFromDB(ctx.env.DB));
+    return json(await foldReportsAndCache(ctx.env.DB));
   } catch (e) { return json({ error: `${e.name}: ${e.message}` }, 400); }
 }

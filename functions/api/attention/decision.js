@@ -1,4 +1,4 @@
-import { json, insertRecord, foldFromDB, nowChicagoISO, RECORD_KINDS, STATUSES, actorFor } from "../../_shared/attn.js";
+import { json, insertRecord, foldAndCache, nowChicagoISO, RECORD_KINDS, STATUSES, actorFor } from "../../_shared/attn.js";
 
 // Records ONE human response, or — when `item_ids` is supplied — the same response across many
 // items in a single round trip. Bulk matters: clearing a 100-item backlog one POST at a time
@@ -24,6 +24,6 @@ export async function onRequestPost(ctx) {
       if (b.status) rec.status = b.status;
       await insertRecord(ctx.env.DB, rec);
     }
-    return json(await foldFromDB(ctx.env.DB));
+    return json(await foldAndCache(ctx.env.DB));
   } catch (e) { return json({ error: `${e.name}: ${e.message}` }, 400); }
 }

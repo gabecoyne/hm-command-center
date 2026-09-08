@@ -1,4 +1,5 @@
-import { json, nowChicagoISO } from "../../_shared/attn.js";
+import { json, nowChicagoISO, clearFoldCache } from "../../_shared/attn.js";
+import { REPORTS_CACHE_KEY } from "../../_shared/reports.js";
 
 const key = (ctx) => (ctx.params.path || []).join("/");
 
@@ -34,5 +35,9 @@ export async function onRequestPut(ctx) {
     await ctx.env.DB.prepare(
       "INSERT INTO documents_history(key, json, updated_at, updated_by) VALUES(?, ?, ?, ?)"
     ).bind(k, body, now, who).run().catch(() => {});
+  // The Reports shelf is folded from THIS document plus the record table, and the fold is cached.
+  // The dispatcher rewrites reports.json here, never through record.js, so this is the only place
+  // that write can invalidate the cached fold. Miss it and the shelf serves yesterday's reports.
+  if (k === "reports.json") await clearFoldCache(ctx.env.DB, REPORTS_CACHE_KEY);
   return new Response(body, { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 }
