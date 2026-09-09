@@ -15,6 +15,7 @@ const state = {
   runs: { items: [] },
   cro: null,                               // data/cro_snapshot.json — build_cro_snapshot.py
   price: null,                             // data/price_snapshot.json — build_price_snapshot.py
+  ecomm: null,                             // data/ecomm_health_scorecard.json — ecomm_health_scorecard.py
   roadmap: { products: [] },
   connected: false,
   loading: true,

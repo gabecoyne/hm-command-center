@@ -8,6 +8,8 @@ const TOP = [
   { id: 'roadmap', glyph: '▬', label: 'Product Roadmap' },
   // Badge is amber when a test has hit significance (see main.js `badges.c`).
   { id: 'cro', glyph: '⇅', label: 'CRO', badge: 'c', badgeCls: 'bg-white/5 text-slate-400' },
+  // Badge is the count of red metrics this week (see main.js `badges.e`).
+  { id: 'ecomm', glyph: '◐', label: 'Ecomm Health', badge: 'e', badgeCls: 'bg-rose-500/15 text-rose-300' },
 ];
 const AGENTIC = [
   { id: 'feedback', glyph: '◎', label: 'Feedback', badge: 'q', badgeCls: 'bg-amber-400/15 text-amber-300' },

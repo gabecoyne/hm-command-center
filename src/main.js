@@ -17,10 +17,11 @@ import { Activity } from './views/Activity.js';
 import { Schedule } from './views/Schedule.js';
 import { Roadmap } from './views/Roadmap.js';
 import { Cro } from './views/Cro.js';
+import { EcommHealth } from './views/EcommHealth.js';
 
-const TITLES = { dashboard: 'Dashboard', feedback: 'Feedback', attention: 'Feedback', tasks: 'Priorities', schedule: 'Schedule', agents: 'Agents', activity: 'Activity', reports: 'Reports', roadmap: 'Product Roadmap', cro: 'CRO' };
+const TITLES = { dashboard: 'Dashboard', feedback: 'Feedback', attention: 'Feedback', tasks: 'Priorities', schedule: 'Schedule', agents: 'Agents', activity: 'Activity', reports: 'Reports', roadmap: 'Product Roadmap', cro: 'CRO', ecomm: 'Ecomm Health' };
 // `attention` kept as an alias so any old link/persisted state still resolves to Feedback.
-const VIEWS = { dashboard: Dashboard, feedback: Feedback, attention: Feedback, tasks: Tasks, agents: Agents, activity: Activity, schedule: Schedule, reports: Reports, roadmap: Roadmap, cro: Cro };
+const VIEWS = { dashboard: Dashboard, feedback: Feedback, attention: Feedback, tasks: Tasks, agents: Agents, activity: Activity, schedule: Schedule, reports: Reports, roadmap: Roadmap, cro: Cro, ecomm: EcommHealth };
 
 function App() {
   const s = useStore();
@@ -43,6 +44,8 @@ function App() {
     // CRO badge counts tests at significance (a decision is waiting) and falls
     // back to the running count when nothing is callable yet.
     c: (s.cro && s.cro.summary ? (s.cro.summary.significant || s.cro.summary.running || 0) : 0),
+    // Ecomm Health badge = metrics red this week. Red is the only colour that asks for a look.
+    e: (s.ecomm && s.ecomm.health && s.ecomm.health.tally ? (s.ecomm.health.tally.red || 0) : 0),
   };
 
   return html`

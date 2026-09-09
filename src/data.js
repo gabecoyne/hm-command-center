@@ -33,7 +33,7 @@ export const aHealth = async () => {
 };
 
 export async function load() {
-  const [attn, roster, elog, tasks, dash, inv, reports, analysis, life, sched, model, cash, pay, calib, runs, cro, price] = await Promise.all([
+  const [attn, roster, elog, tasks, dash, inv, reports, analysis, life, sched, model, cash, pay, calib, runs, cro, price, ecomm] = await Promise.all([
     fetch((CONFIG.apiBase || '') + '/api/attention/state').then(r => r.json())
       .catch(() => aGet('attention/queue.json').catch(() => ({ items: [] }))),
     aGet('ecomm_state.json').catch(() => ({ agents: [], schedules: {} })),
@@ -58,10 +58,12 @@ export async function load() {
     // Price tests ride on the CRO page but have their own feeder
     // (build_price_snapshot.py); one being stale must not blank the other.
     aGet('price_snapshot.json').catch(() => null),
+    // Weekly funnel scorecard (Scripts/ecomm_health_scorecard.py, Monday 8am CT).
+    aGet('ecomm_health_scorecard.json').catch(() => null),
   ]);
   let roadmap = getState().roadmap;
   try { roadmap = await aGet('roadmap.json'); } catch {}
-  setState({ attn, roster, elog, tasks, dash, inv, reports, analysis, life, sched, model, cash, pay, calib, runs, cro, price, roadmap, loading: false });
+  setState({ attn, roster, elog, tasks, dash, inv, reports, analysis, life, sched, model, cash, pay, calib, runs, cro, price, ecomm, roadmap, loading: false });
 }
 
 /* The attention queue is append-only: one file per item, one file per decision, and a generated
