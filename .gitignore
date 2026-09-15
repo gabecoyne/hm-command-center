@@ -20,3 +20,6 @@ __pycache__/
 cloudflare/seed_attention.sql
 .wrangler/
 node_modules/
+
+# scratch from a sandbox deploy (2026-09-08); safe to delete
+.tmp-deploy/

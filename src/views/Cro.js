@@ -213,6 +213,103 @@ function Stage1Panel({ t }) {
     </div>`;
 }
 
+
+// ── single-ad ROUTE test (not an A/B test) ───────────────────────────────────
+// One duplicated ad → new destination, compared with the SOURCE ad it was duped
+// from, still running to the PDP, same window (Collin/Gabe 2026-09-15). No
+// p-value, no leader, never "underpowered" — that is the design. The card
+// shows the contemporaneous read side by side and keeps the "do not read a
+// null as a loss" caveats on the surface, where the reader actually is.
+function RoutePanel({ t }) {
+  const arms = t.arms || [];
+  const A = arms.find(a => a.arm === 'A') || {};
+  const B = arms.find(a => a.arm === 'B') || {};
+  const rr = t.route_read || {};
+  const hasMix = !!(B.mix || A.mix);
+  const rows = [
+    ['Sessions',        a => num(a.sessions)],
+    ['Engagement rate', a => pct(a.engagement_rate, 1)],
+    ['Add-to-carts',    a => num(a.add_to_carts)],
+    ['ATC rate',        a => pct(a.atc_rate, 1)],
+    ['Orders (Shopify)',a => num(a.purchases)],
+    ['Revenue',         a => money(a.revenue)],
+    ['CVR',             a => pct(a.cvr)],
+    ['RPV',             a => money(a.rpv)],
+    ['AOV',             a => money(a.aov)],
+    ['Spend',           a => money(a.spend)],
+    ['Impressions',     a => num(a.impressions)],
+    ['Link clicks',     a => num(a.link_clicks)],
+    ['CTR (link)',      a => pct(a.ctr_link)],
+    ['ATC per click',   a => pct(a.atc_per_click, 1)],
+    ['CPP',             a => money(a.cpp)],
+    ['Meta ROAS (diag.)', a => a.meta_roas == null ? '—' : (+a.meta_roas).toFixed(2) + 'x'],
+  ];
+  const tw = t.tripwire;
+  const tripState = String(rr.tripwire_state || 'not_reached');
+  const tripHit = tripState.startsWith('TRIPPED');
+  return html`
+    <div class="space-y-3">
+      <div class="flex flex-wrap gap-2 items-center">
+        <span class="text-[10px] px-1.5 py-0.5 rounded border border-sky-400/30 bg-sky-500/10 text-sky-200">ROUTE · not an A/B test</span>
+        ${rr.window ? html`<span class="text-[10px] px-1.5 py-0.5 rounded border border-edge text-slate-400 font-mono">window ${rr.window}</span>` : null}
+        ${t.read_on ? html`<span class="text-[10px] px-1.5 py-0.5 rounded border border-edge text-slate-400">checkpoint ${t.read_on}</span>` : null}
+        ${tw ? html`<span class="text-[10px] px-1.5 py-0.5 rounded border ${tripHit ? 'border-rose-400/40 bg-rose-500/10 text-rose-200' : 'border-edge text-slate-400'}">
+          tripwire RPV < ${money(tw.floor)} after ${num(tw.after_sessions)} sess · ${tripState.replace('_', ' ')}</span>` : null}
+        ${rr.cpp_delta != null ? html`<span class="text-[10px] px-1.5 py-0.5 rounded border border-edge ${rr.cpp_delta < 0 ? 'text-emerald-300' : 'text-amber-200'}">CPP ${sgn(rr.cpp_delta)} vs source</span>` : null}
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-[13px]">
+          <thead>
+            <tr class="text-[10px] uppercase tracking-widest text-slate-500 border-b border-edge">
+              <th class="text-left py-2 font-normal">Read</th>
+              <th class="text-right py-2 font-normal">A · source ad → PDP</th>
+              <th class="text-right py-2 font-normal">B · route ad</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="border-b border-edge/50">
+              <td class="py-1.5 text-[11px] text-slate-500">arm</td>
+              <td class="py-1.5 text-right text-[11px] text-slate-500 max-w-[260px]">${A.label || ''}</td>
+              <td class="py-1.5 text-right text-[11px] text-slate-500 max-w-[260px]">${B.label || ''}</td>
+            </tr>
+            ${rows.map(([k, f]) => html`
+              <tr class="border-b border-edge/50">
+                <td class="py-1.5 text-slate-400">${k}</td>
+                <td class="py-1.5 text-right font-mono text-slate-300">${f(A)}</td>
+                <td class="py-1.5 text-right font-mono text-white">${f(B)}</td>
+              </tr>`)}
+            ${hasMix ? html`
+              <tr class="border-b border-edge/50">
+                <td class="py-1.5 text-slate-400">TSD orders (1 / 2 / 3-Dish)</td>
+                ${[A, B].map(a => { const m = a.mix || {}; const tt = m.tiers || {}; return html`
+                  <td class="py-1.5 text-right font-mono text-slate-300">${num(m.tsd_orders)} <span class="text-slate-500">(${num(tt['1-Dish'])} / ${num(tt['2-Dish'])} / ${num(tt['3-Dish'])})</span></td>`; })}
+              </tr>
+              <tr class="border-b border-edge/50 bg-white/[0.03]">
+                <td class="py-1.5 text-slate-200">3-Dish share <span class="text-[11px] text-slate-500">· primary · baseline ${pct((B.mix || A.mix || {}).baseline_share_3dish, 1)}</span></td>
+                <td class="py-1.5 text-right font-mono text-slate-300">${pct((A.mix || {}).share_3dish, 1)}</td>
+                <td class="py-1.5 text-right font-mono text-white">${pct((B.mix || {}).share_3dish, 1)}${(B.mix || {}).share_3dish_delta_pts != null ? html` <span class="text-[11px] ${B.mix.share_3dish_delta_pts > 0 ? 'text-emerald-300' : 'text-rose-300'}">${B.mix.share_3dish_delta_pts > 0 ? '+' : ''}${B.mix.share_3dish_delta_pts} pts</span>` : null}</td>
+              </tr>` : null}
+          </tbody>
+        </table>
+      </div>
+
+      ${rr.note ? html`<div class="text-[11.5px] text-slate-500 border-l-2 border-edge/60 pl-3">${rr.note}</div>` : null}
+      ${t.comparison_caveat || (t.power || {}).comparison_caveat ? html`
+        <div class="text-[12px] text-amber-200/70 border-l-2 border-amber-400/30 pl-3">${t.comparison_caveat || t.power.comparison_caveat}</div>` : null}
+      ${t.power_caveat || (t.power || {}).design_change_2026_09_15 ? html`
+        <${Disclosure} label="Why there is no significance verdict">
+          <div class="text-[12px] text-slate-400 space-y-2">
+            <div>${t.power_caveat || t.power.design_change_2026_09_15}</div>
+            ${(t.decision_metrics || []).length ? html`<div><span class="text-slate-500">Decision metrics:</span> ${t.decision_metrics.map(m => m.metric).join(', ')}</div>` : null}
+            ${(t.excluded_metrics || []).length ? html`<div><span class="text-slate-500">Monitored, never decisive:</span> ${t.excluded_metrics.map(m => m.metric).join(', ')}</div>` : null}
+            ${t.banked_control ? html`<div><span class="text-slate-500">Banked pre-launch control (${t.banked_control.window}):</span> ${num(t.banked_control.sessions)} sess · CVR ${pct(t.banked_control.cvr)} · RPV ${money(t.banked_control.rpv)}</div>` : null}
+            ${(t.confounders || []).map(c => html`<div><span class="text-slate-500">Confounder (${c.severity}):</span> ${c.summary}</div>`)}
+          </div>
+        </${Disclosure}>` : null}
+    </div>`;
+}
+
 // ── one running test ─────────────────────────────────────────────────────────
 function TestCard({ t }) {
   const [open, setOpen] = useState(t.state === 'significant');
@@ -226,6 +323,9 @@ function TestCard({ t }) {
     `Arms: ${arms.map(a => `${a.arm} n=${a.sessions} cvr=${a.cvr} rpv=${a.rpv}`).join(' | ')}.` +
     // A Stage-1 test asked about on its RPV numbers alone invites the wrong
     // answer — those arms are ranked on ad-side efficiency, not revenue.
+    (t.route
+      ? ` ROUTE TEST, NOT A/B: one duplicated ad vs the source ad it was duped from, same window. No p-value, no winner, a null is not a loss. Judge on CPP, click->ATC, orders, RPV, and 3-Dish mix where present. Window ${(t.route_read || {}).window}. A: spend=${(arms[0]||{}).spend} cpp=${(arms[0]||{}).cpp} atc/click=${(arms[0]||{}).atc_per_click}. B: spend=${(arms[1]||{}).spend} cpp=${(arms[1]||{}).cpp} atc/click=${(arms[1]||{}).atc_per_click}. Tripwire: ${JSON.stringify(t.tripwire || null)}. Checkpoint ${t.read_on}.`
+      : '') +
     (t.stage === 1
       ? ` STAGE 1 — decided on add-to-carts per link click, not CVR/RPV. Baseline ` +
         `${(t.baselines || {}).atc_per_click}. Ad side: ${arms.map(a =>
@@ -272,7 +372,7 @@ function TestCard({ t }) {
               Stage 2 · revenue read — not the decision metric yet
             </div>` : null}
 
-          ${(arms.length && (t.stage !== 1 || arms.some(a => a.sessions))) ? html`
+          ${t.route ? html`<${RoutePanel} t=${t}/>` : (arms.length && (t.stage !== 1 || arms.some(a => a.sessions))) ? html`
             <div class="overflow-x-auto">
               <table class="w-full text-[13px]">
                 <thead>
