@@ -254,7 +254,7 @@ function RoutePanel({ t }) {
         ${rr.window ? html`<span class="text-[10px] px-1.5 py-0.5 rounded border border-edge text-slate-400 font-mono">window ${rr.window}</span>` : null}
         ${t.read_on ? html`<span class="text-[10px] px-1.5 py-0.5 rounded border border-edge text-slate-400">checkpoint ${t.read_on}</span>` : null}
         ${tw ? html`<span class="text-[10px] px-1.5 py-0.5 rounded border ${tripHit ? 'border-rose-400/40 bg-rose-500/10 text-rose-200' : 'border-edge text-slate-400'}">
-          tripwire RPV < ${money(tw.floor)} after ${num(tw.after_sessions)} sess · ${tripState.replace('_', ' ')}</span>` : null}
+          tripwire RPV ${'<'} ${money(tw.floor)} after ${num(tw.after_sessions)} sess · ${tripState.replace('_', ' ')}</span>` : null}
         ${rr.cpp_delta != null ? html`<span class="text-[10px] px-1.5 py-0.5 rounded border border-edge ${rr.cpp_delta < 0 ? 'text-emerald-300' : 'text-amber-200'}">CPP ${sgn(rr.cpp_delta)} vs source</span>` : null}
       </div>
 
