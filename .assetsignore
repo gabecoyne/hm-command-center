@@ -8,3 +8,4 @@ scripts
 WORKFLOW.md
 .gitignore
 .assetsignore
+.tmp-deploy
