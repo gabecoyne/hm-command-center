@@ -65,6 +65,7 @@ const SOURCE = {
   'Product engagement': 'GA4', 'Cart & checkout': 'GA4', 'Conversion & revenue': 'Triple Whale · GA4 · model',
   'Paid efficiency': 'Triple Whale · unit economics', 'Email': 'Klaviyo', 'SMS': 'Klaviyo', 'Owned total': 'Klaviyo ÷ Triple Whale',
   'Organic': 'Search Console · Google Ads', 'Retention & ops': 'Shopify', 'Market conditions': 'Google Trends (side-loaded)',
+  'Buyer journey': 'Shopify customerJourneySummary',
 };
 
 // ── sparkline (trend column) ─────────────────────────────────────────────────
@@ -320,6 +321,78 @@ function Alerts({ alerts, mode }) {
     </div>`;
 }
 
+// ── ATC decomposition + journey economics ────────────────────────────────────
+// ATC rate = product views/session × ATC per product view. Both factors used to sit on
+// benchmarks that never left green, so a falling ATC rate read as an unattributable site
+// problem. This panel names which of the two moved: routing (did they reach a PDP) or
+// persuasion (did the PDP close them).
+function Decomposition({ dec, econ }) {
+  const [horizon, setHorizon] = useState('vs_median');
+  if (!dec && !(econ && econ.trackable_orders)) return null;
+  const split = ((dec || {}).splits || []).find(s => s.horizon === horizon);
+  const money = n => !isNum(n) ? '—' : '$' + Math.round(+n).toLocaleString();
+
+  return html`
+    <div class="rounded-xl border border-edge bg-panel">
+      <div class="px-4 py-2.5 border-b border-edge flex items-center gap-2">
+        <span class="text-white text-[14px] font-medium">Where the ATC rate moved</span>
+        <span class="text-[11px] text-slate-500">${(dec || {}).identity || ''}</span>
+        ${dec ? html`
+          <div class="ml-auto flex rounded-md border border-edge overflow-hidden text-[10.5px]">
+            ${[['vs_median', 'vs median'], ['wow', 'WoW']].map(([k, lab]) => html`
+              <button key=${k} class="px-2 py-0.5 ${horizon === k ? 'bg-white/10 text-white' : 'text-slate-400'}"
+                onClick=${() => setHorizon(k)}>${lab}</button>`)}
+          </div>` : null}
+      </div>
+
+      ${split ? html`
+        <div class="px-4 py-3">
+          <div class="flex items-baseline gap-2 mb-2.5">
+            <span class="text-[11px] text-slate-500">ATC rate</span>
+            <span class="font-mono text-[15px] ${split.total_pct < 0 ? 'text-rose-300' : 'text-emerald-300'}">${sgn(split.total_pct)}</span>
+          </div>
+          ${split.terms.map(t => {
+            // share_of_move can exceed 100% when the two factors move in opposite
+            // directions — clamp the BAR, never the printed number.
+            const w = Math.min(Math.abs(t.share_of_move), 100);
+            return html`
+              <div class="mb-2" key=${t.key}>
+                <div class="flex items-baseline gap-2 text-[12px]">
+                  <span class="text-slate-200">${t.label}</span>
+                  <span class="text-[10.5px] text-slate-500">${t.meaning}</span>
+                  <span class="ml-auto font-mono text-[11.5px] ${t.pct < 0 ? 'text-rose-300' : 'text-emerald-300'}">${sgn(t.pct)}</span>
+                  <span class="font-mono text-[11px] text-slate-400 w-14 text-right">${t.share_of_move.toFixed(0)}%</span>
+                </div>
+                <div class="mt-1 h-1.5 rounded bg-white/5 overflow-hidden">
+                  <div class="h-full ${t.share_of_move >= 0 ? 'bg-sky-400/60' : 'bg-amber-400/60'}" style="width:${w}%"></div>
+                </div>
+              </div>`;
+          })}
+          ${dec.reads ? html`<div class="text-[11.5px] text-slate-400 mt-2.5 leading-snug">${dec.reads}</div>` : null}
+        </div>` : html`<div class="px-4 py-3 text-[12px] text-slate-500">Not enough weeks to split the move.</div>`}
+
+      ${econ && econ.trackable_orders ? html`
+        <div class="px-4 py-3 border-t border-edge">
+          <div class="text-[11px] text-slate-500 mb-2">
+            What the second visit costs · ${econ.trackable_orders.toLocaleString()} trackable orders,
+            ${econ.window ? `${shortDate(econ.window.start)} – ${shortDate(econ.window.end)}` : ''}
+          </div>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[12px]">
+            ${[['Closed on visit 1', isNum(econ.one_visit_pct) ? econ.one_visit_pct.toFixed(1) + '%' : '—', 'no return trip needed'],
+               ['Revenue needing 2+', isNum(econ.multi_revenue_share) ? econ.multi_revenue_share.toFixed(1) + '%' : '—', 'of gross revenue'],
+               ['Extra discount', isNum(econ.discount_gap_pp) ? sgn(econ.discount_gap_pp, 2).replace('%', 'pp') : '—', '2+ visit vs 1-visit'],
+               ['Margin given up', money(econ.discount_cost_window), 'if the gap closed — upper bound']
+              ].map(([lab, val, sub]) => html`
+              <div key=${lab}>
+                <div class="text-[10.5px] text-slate-500">${lab}</div>
+                <div class="font-mono text-[15px] text-white">${val}</div>
+                <div class="text-[10px] text-slate-600">${sub}</div>
+              </div>`)}
+          </div>
+        </div>` : null}
+    </div>`;
+}
+
 // ── movers + correlations ────────────────────────────────────────────────────
 function Movers({ movers }) {
   if (!movers.length) return null;
@@ -430,6 +503,7 @@ const SECTIONS = [
   ['Owned total', 'Email + SMS share of gross revenue — the insulation from paid'],
   ['Organic', 'Search Console: clicks, impressions, position, brand vs non-brand'],
   ['Retention & ops', 'Repeat share (Shopify, account-age proxy)'],
+  ['Buyer journey', 'Visits and days an order takes — zero-visit (CS/manual) orders excluded, 30-day attribution cap'],
   ['Market conditions', 'Google Trends — shown for context, never scored'],
 ];
 
@@ -503,6 +577,8 @@ export function EcommHealth() {
       <${DemandShape} ds=${d.demand_shape}/>
 
       <${Alerts} alerts=${alerts} mode=${mode}/>
+
+      <${Decomposition} dec=${d.decomposition} econ=${d.journey_economics}/>
 
       ${SECTIONS.map(([name, sub], i) => html`
         <${MetricSection} name=${name} subtitle=${sub} rows=${(d.sections || {})[name]} weeks=${weeks} mode=${mode}
