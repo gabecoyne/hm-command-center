@@ -19,7 +19,14 @@ import { Section } from '../components/Section.js';
 
 // ── formatting ───────────────────────────────────────────────────────────────
 const isNum = n => n != null && !isNaN(+n);
-const kfmt = n => Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : (Math.abs(n) >= 10000 ? Math.round(n / 1000) + 'K' : Math.round(n).toLocaleString());
+// Compact number. The `< 10` branch matters: without it Math.round() flattened every small
+// '#' metric in the week cells — "Visits to order 2.48" rendered "2", "Product views / session
+// 0.79" rendered "1" — so a row could move all window and look perfectly flat. Whole numbers
+// still print clean (7 -> "7"), because unary + drops the trailing ".00".
+const kfmt = n => Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(2) + 'M'
+  : Math.abs(n) >= 10000 ? Math.round(n / 1000) + 'K'
+  : Math.abs(n) < 10 ? String(+n.toFixed(2))
+  : Math.round(n).toLocaleString();
 function fmt(v, unit, compact = false) {
   if (!isNum(v)) return '—';
   const n = +v;
