@@ -374,8 +374,8 @@ function Decomposition({ dec, econ }) {
       ${econ && econ.trackable_orders ? html`
         <div class="px-4 py-3 border-t border-edge">
           <div class="text-[11px] text-slate-500 mb-2">
-            What the second visit costs · ${econ.trackable_orders.toLocaleString()} trackable orders,
-            ${econ.window ? `${shortDate(econ.window.start)} – ${shortDate(econ.window.end)}` : ''}
+            ${`What the second visit costs · ${econ.trackable_orders.toLocaleString()} trackable orders` +
+              (econ.window ? `, ${shortDate(econ.window.start)} – ${shortDate(econ.window.end)}` : '')}
           </div>
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[12px]">
             ${[['Closed on visit 1', isNum(econ.one_visit_pct) ? econ.one_visit_pct.toFixed(1) + '%' : '—', 'no return trip needed'],
