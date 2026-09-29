@@ -281,12 +281,12 @@ function RoutePanel({ t }) {
               </tr>`)}
             ${hasMix ? html`
               <tr class="border-b border-edge/50">
-                <td class="py-1.5 text-slate-400">TSD orders (1 / 2 / 3-Dish)</td>
+                <td class="py-1.5 text-slate-400">Dish orders (1 / 2 / 3+) <span class="text-[11px] text-slate-500">· incl. KIT, qty-weighted</span></td>
                 ${[A, B].map(a => { const m = a.mix || {}; const tt = m.tiers || {}; return html`
-                  <td class="py-1.5 text-right font-mono text-slate-300">${num(m.tsd_orders)} <span class="text-slate-500">(${num(tt['1-Dish'])} / ${num(tt['2-Dish'])} / ${num(tt['3-Dish'])})</span></td>`; })}
+                  <td class="py-1.5 text-right font-mono text-slate-300">${num(m.dish_orders != null ? m.dish_orders : m.tsd_orders)} <span class="text-slate-500">(${num(tt['1-Dish'])} / ${num(tt['2-Dish'])} / ${num(tt['3-Dish'])})</span></td>`; })}
               </tr>
               <tr class="border-b border-edge/50 bg-white/[0.03]">
-                <td class="py-1.5 text-slate-200">3-Dish share <span class="text-[11px] text-slate-500">· primary · baseline ${pct((B.mix || A.mix || {}).baseline_share_3dish, 1)}</span></td>
+                <td class="py-1.5 text-slate-200">3+ Dish share <span class="text-[11px] text-slate-500">· primary · baseline ${pct((B.mix || A.mix || {}).baseline_share_3dish, 1)}</span></td>
                 <td class="py-1.5 text-right font-mono text-slate-300">${pct((A.mix || {}).share_3dish, 1)}</td>
                 <td class="py-1.5 text-right font-mono text-white">${pct((B.mix || {}).share_3dish, 1)}${(B.mix || {}).share_3dish_delta_pts != null ? html` <span class="text-[11px] ${B.mix.share_3dish_delta_pts > 0 ? 'text-emerald-300' : 'text-rose-300'}">${B.mix.share_3dish_delta_pts > 0 ? '+' : ''}${B.mix.share_3dish_delta_pts} pts</span>` : null}</td>
               </tr>` : null}
